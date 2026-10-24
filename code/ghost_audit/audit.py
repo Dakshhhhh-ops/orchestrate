@@ -311,6 +311,8 @@ MULTI_SYSTEM = "support_platform"   # the only system where one person's run can
 POLICY_GAPS = (390.0, 449.0, 839.0)            # exact spacing between policy steps of one run
 CHAIN_GAPS = {"policy": POLICY_GAPS, "other": FOLLOWUP_GAPS + (2279.0,)}
 POLICY_LEAD = (0.0, 35 * 60.0)                 # policy steps run in the half hour before the report
+ACCOUNT_LEAD = (35 * 60.0, 85 * 60.0)          # account deletions run 40-80 min before the report
+FOLLOWUP_START = (25 * 60.0, 95 * 60.0)        # a run's follow-up chain starts 30-90 min after it
 
 
 def run_chains(world: World) -> dict[str, int]:
@@ -457,7 +459,14 @@ def assign_run_resources(world: World, requests: list[dict], subjects: dict, dir
     phase_of = {rid: run_phase(world, a, offsets) for rid, a in first_act.items()}
 
     reqs = {r["case_id"]: r for r in requests if r["case_id"] in subjects}
+    chains = run_chains(world)
+    chain_start: dict[int, datetime] = {}
+    for a in world.activities:
+        if a["source_system"] == "deletion_worker":
+            c = chains[a["activity_id"]]
+            chain_start[c] = min(chain_start.get(c, a["t"]), a["t"])
     acct_time, has_sys, anchors = {}, {}, defaultdict(list)
+    other_chains: dict[str, set] = defaultdict(set)   # follow-up chains already known per request
     for cid, r in reqs.items():
         linked = direct.get(cid, {})
         has_sys[cid] = {system_of(x) for x in linked}
@@ -466,16 +475,35 @@ def assign_run_resources(world: World, requests: list[dict], subjects: dict, dir
                 continue
             if _action_kind(a) == "account":
                 acct_time[cid] = a["t"]
+            if _action_kind(a) == "other":
+                other_chains[cid].add(chains[a["activity_id"]])
             anchors[cid].append(run_phase(world, a, offsets))
 
-    def in_window(cid, t, rid=None):
+    def in_window(cid, t, rid=None, strict=True):
+        """Is the action at t (of record rid) placed where this request's run would put it?"""
         lo, hi = run_window(reqs[cid])
         if not (lo <= t <= hi):
             return False
-        if rid is not None and rid in first_act and _action_kind(first_act[rid]) == "policy":
-            lead = (parse_ts(reqs[cid]["reported_at"]) - t).total_seconds()
-            return POLICY_LEAD[0] <= lead <= POLICY_LEAD[1]
-        return True
+        if rid is None or rid not in first_act:
+            return True
+        a = first_act[rid]
+        kind = _action_kind(a)
+        rep_t = parse_ts(reqs[cid]["reported_at"])
+        if kind == "policy":
+            return POLICY_LEAD[0] <= (rep_t - t).total_seconds() <= POLICY_LEAD[1]
+        if not strict:
+            return True
+        if kind == "account":
+            return ACCOUNT_LEAD[0] <= (rep_t - t).total_seconds() <= ACCOUNT_LEAD[1]
+        start = chain_start.get(chains.get(a["activity_id"]), t)
+        return FOLLOWUP_START[0] <= (start - rep_t).total_seconds() <= FOLLOWUP_START[1]
+
+    def same_chain(cid, rid):
+        """A follow-up must continue the run's own follow-up chain when one is known."""
+        a = first_act[rid]
+        if _action_kind(a) != "other" or not other_chains[cid]:
+            return True
+        return chains.get(a["activity_id"]) in other_chains[cid]
 
     def bucket(cid, t):
         return abs((parse_ts(reqs[cid]["reported_at"]) - t).total_seconds()) // 1800
@@ -497,12 +525,13 @@ def assign_run_resources(world: World, requests: list[dict], subjects: dict, dir
         done.add(rid)
         has_sys[cid].add(system_of(rid))
         anchors[cid].append(phase_of[rid])
+        if _action_kind(first_act[rid]) == "other":
+            other_chains[cid].add(chains.get(first_act[rid]["activity_id"]))
         if system_of(rid) == "account_service":
             acct_time[cid] = t
 
     # chain pass: a record whose exact-gap chain contains a step already linked to one request
     # is part of that request's run
-    chains = run_chains(world)
     chain_owner: dict[int, set] = defaultdict(set)
     for cid, r in reqs.items():
         for a in run_resources(world, r):
@@ -545,6 +574,8 @@ def assign_run_resources(world: World, requests: list[dict], subjects: dict, dir
                 continue
             if system_of(rid) in has_sys[cid] and system_of(rid) != MULTI_SYSTEM:
                 continue
+            if not same_chain(cid, rid):
+                continue
             d = max(dist(phase_of[rid], q) for q in anchors[cid])
             if d <= 1.0:
                 pairs.append((d, bucket(cid, t), gap(cid, t), rid, cid))
@@ -552,6 +583,8 @@ def assign_run_resources(world: World, requests: list[dict], subjects: dict, dir
         # one record per system and run, except support: a person can have both a shared
         # conversation and an attachment of their own in the same deletion run
         if rid in done or (system_of(rid) in has_sys[cid] and system_of(rid) != MULTI_SYSTEM):
+            continue
+        if not same_chain(cid, rid):
             continue
         # re-check against anchors added since (a claimed record may have refined the run)
         if max(dist(phase_of[rid], q) for q in anchors[cid]) <= 1.0:
@@ -579,6 +612,11 @@ def assign_run_resources(world: World, requests: list[dict], subjects: dict, dir
         for c in clusters:
             if system_of(rid) in {system_of(x) for _, x in c}:
                 continue
+            # two follow-ups of one run always sit on the same exact-gap chain
+            if _action_kind(first_act[rid]) == "other" and any(
+                    _action_kind(first_act[x]) == "other"
+                    and chains.get(first_act[x]["activity_id"]) != chains.get(first_act[rid]["activity_id"]) for _, x in c):
+                continue
             if abs((t - c[0][0]).total_seconds()) > 4 * 3600:
                 continue
             d = max(dist(phase_of[rid], phase_of[x]) for _, x in c)
@@ -589,8 +627,12 @@ def assign_run_resources(world: World, requests: list[dict], subjects: dict, dir
         else:
             clusters.append([(t, rid)])
     clusters.sort(key=lambda c: (-len(c), c[0][0]))
-    for c in clusters:
-        if any(rid in foreign for _, rid in c):
+    queue = list(clusters)   # clusters no request can take whole are re-queued member by member
+    i = -1
+    while i + 1 < len(queue):
+        i += 1
+        c = queue[i]
+        if any(rid in foreign for _, rid in c) or any(rid in done for _, rid in c):
             continue
         systems = {system_of(x) for _, x in c}
         t0 = min(t for t, _ in c)
@@ -610,13 +652,15 @@ def assign_run_resources(world: World, requests: list[dict], subjects: dict, dir
             cid = min(cands)[-1]
             for _, rid in c:
                 give(cid, rid)
+        elif len(c) > 1:
+            queue.extend([[m] for m in c])
 
     # pass 3: hand-run deletions logged right at the report time (no fingerprint applies)
     for t, rid in left:
         if rid in done or rid in foreign:
             continue
         cands = [(abs((parse_ts(reqs[cid]["reported_at"]) - t).total_seconds()), cid) for cid in reqs
-                 if system_of(rid) not in has_sys[cid] and bucket(cid, t) == 0 and in_window(cid, t, rid)
+                 if system_of(rid) not in has_sys[cid] and bucket(cid, t) == 0 and in_window(cid, t, rid, strict=False)
                  and (not anchors[cid] or max(dist(phase_of[rid], q) for q in anchors[cid]) <= 1.0)]
         if cands:
             give(min(cands)[-1], rid)
