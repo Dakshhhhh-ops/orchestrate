@@ -303,55 +303,243 @@ def run_resources(world: World, req: dict) -> list[dict]:
     return [a for a in world.activities if lo <= a["t"] <= hi and a["source_system"] == "deletion_worker"]
 
 
+PHASE_PERIOD = 30.0          # seconds
+FOLLOWUP_GAPS = (1110.0, 1169.0)   # exact spacing between consecutive follow-up actions of one run
+STEP_DRIFT = 0.5             # each run step lands 0.5 s earlier in the 30 s cycle
+TOL = {"account": 0.5, "policy": 0.8, "other": 0.8}
+
+
+def _action_kind(a: dict) -> str:
+    """Which part of a deletion run an activity belongs to (account delete, policy step, follow-up)."""
+    if a["event_type"] == "DELETE_RECORD" and a["target_system"] == "account_service":
+        return "account"
+    if a["details"].startswith("Policy action completed"):
+        return "policy"
+    return "other"
+
+
+def _circ(d: float) -> float:
+    d = d % PHASE_PERIOD
+    return min(d, PHASE_PERIOD - d)
+
+
+def _step_index(world: World) -> dict[str, int]:
+    """Position of each deletion-worker action inside its run.
+
+    Policy steps sit on fixed minutes (:31, :38, :45, :52). Follow-up steps of one run are spaced
+    exactly 1110 s or 1169 s apart, so an action's position is the length of that exact-gap chain.
+    """
+    if hasattr(world, "_steps"):
+        return world._steps
+    dw = [a for a in world.activities if a["source_system"] == "deletion_worker"]
+    steps = {}
+    other = sorted((a for a in dw if _action_kind(a) == "other"), key=lambda a: a["t"])
+    by_time = defaultdict(list)
+    for a in other:
+        by_time[a["t"]].append(a)
+    for a in other:
+        k = 0
+        for g in FOLLOWUP_GAPS:
+            for b in by_time.get(a["t"] - timedelta(seconds=g), []):
+                k = max(k, steps[b["activity_id"]] + 1)
+        steps[a["activity_id"]] = k
+    for a in dw:
+        if _action_kind(a) == "policy":
+            steps[a["activity_id"]] = max(0, round((a["t"].minute - 31) / 7.0))
+        elif _action_kind(a) == "account":
+            steps[a["activity_id"]] = 0
+    world._steps = steps
+    return steps
+
+
+def _raw_phase(world: World, a: dict) -> float:
+    k = _step_index(world).get(a["activity_id"], 0)
+    return (a["t"].timestamp() % PHASE_PERIOD + STEP_DRIFT * k) % PHASE_PERIOD
+
+
+def learn_run_phase(world: World, requests: list[dict], subjects: dict, direct: dict) -> dict[str, float]:
+    """Learn how each kind of run action is timed relative to the run's account deletion.
+
+    All actions of one deletion run share a seconds-phase with that run's account deletion:
+    (account phase - drift-corrected action phase) mod 30 s is constant per action kind. The
+    constant is measured on runs whose records are all linked by identifiers (circular mean),
+    then used to place identifier-less records into the right run.
+    """
+    import math
+
+    diffs: dict[str, list] = defaultdict(list)
+    for r in requests:
+        linked = direct.get(r["case_id"])
+        if not linked:
+            continue
+        run = [a for a in run_resources(world, r) if a["resource_id"] in linked]
+        acc = [a for a in run if _action_kind(a) == "account"]
+        if len(acc) != 1:
+            continue
+        pa = _raw_phase(world, acc[0])
+        for a in run:
+            k = _action_kind(a)
+            if k != "account":
+                diffs[k].append((pa - _raw_phase(world, a)) % PHASE_PERIOD)
+    offsets = {"account": 0.0, "policy": 19.25, "other": 8.25}
+    for k, vals in diffs.items():
+        if len(vals) < 5:
+            continue
+        ang = [2 * math.pi * v / PHASE_PERIOD for v in vals]
+        mean = math.atan2(sum(map(math.sin, ang)), sum(map(math.cos, ang)))
+        offsets[k] = (mean * PHASE_PERIOD / (2 * math.pi)) % PHASE_PERIOD
+    return offsets
+
+
+def run_phase(world: World, a: dict, offsets: dict) -> tuple[float, float]:
+    """(implied account-deletion phase, tolerance) for one run action."""
+    k = _action_kind(a)
+    return (_raw_phase(world, a) + offsets.get(k, 0.0)) % PHASE_PERIOD, TOL[k]
+
+
 def assign_run_resources(world: World, requests: list[dict], subjects: dict, direct: dict) -> dict[str, set]:
     """Tie identifier-less resources to requests through the deletion run that touched them.
 
-    A resource the deletion worker acted on, which no evidence links to any known person, is
-    offered to the requests whose run window contains the action. Each request takes at most
-    one such resource per system and only for systems it has no linked record in; ties go to
-    the request whose own account deletion happened closest before the action.
+    Signal: every action of one deletion run shares the seconds-phase of that run's account
+    deletion (after removing a 0.5 s drift per step; offsets learned by `learn_run_phase` from
+    identifier-linked runs). Each request takes at most one such resource per system and only
+    for systems it has no linked record in.
+
+    1. best-first: identifier-less records whose phase matches a request's anchored run
+    2. records nobody claims are grouped into runs by phase; each run goes, whole, to a request
+       in its window that has no anchor yet
+    3. hand-run deletions logged at the report time itself (no fingerprint) go to that request
+    Records that fit no request are left out rather than guessed.
     """
-    unowned = []
+    offsets = learn_run_phase(world, requests, subjects, direct)
+    first_act = {}
     for rid, acts in world.act_by_rid.items():
         dw = [a for a in acts if a["source_system"] == "deletion_worker"]
-        if not dw:
-            continue
-        if world.idx.owners(world.owner_tokens.get(rid, set())):
-            continue
-        unowned.append((dw[0]["t"], rid))
-    # accounts first: the run's own account anchors the timing of the other actions
-    unowned.sort(key=lambda x: (prefix_of(x[1]) != "account", x[0]))
-    acct_time, has_sys = {}, {}
-    for r in requests:
-        cid = r["case_id"]
-        if cid not in subjects:
-            continue
+        if dw and not world.idx.owners(world.owner_tokens.get(rid, set())):
+            first_act[rid] = dw[0]
+    phase_of = {rid: run_phase(world, a, offsets) for rid, a in first_act.items()}
+
+    reqs = {r["case_id"]: r for r in requests if r["case_id"] in subjects}
+    acct_time, has_sys, anchors = {}, {}, defaultdict(list)
+    for cid, r in reqs.items():
         linked = direct.get(cid, {})
         has_sys[cid] = {system_of(x) for x in linked}
         for a in run_resources(world, r):
-            if a["event_type"] == "DELETE_RECORD" and a["resource_id"] in linked and a["target_system"] == "account_service":
+            if a["resource_id"] not in linked:
+                continue
+            if _action_kind(a) == "account":
                 acct_time[cid] = a["t"]
+            anchors[cid].append(run_phase(world, a, offsets))
+
+    def in_window(cid, t):
+        lo, hi = run_window(reqs[cid])
+        return lo <= t <= hi
+
+    def bucket(cid, t):
+        return abs((parse_ts(reqs[cid]["reported_at"]) - t).total_seconds()) // 1800
+
+    def gap(cid, t):
+        at = acct_time.get(cid)
+        return (t - at).total_seconds() if at and at <= t else 1e9
+
+    def dist(p, q):
+        """Phase distance in units of the combined tolerance (<= 1 means same run)."""
+        return _circ(p[0] - q[0]) / (p[1] + q[1])
+
     out: dict[str, set] = defaultdict(set)
-    for t, rid in unowned:
-        sysid = system_of(rid)
-        cands = []
-        for r in requests:
-            cid = r["case_id"]
-            if cid not in subjects or sysid in has_sys.get(cid, set()):
+    done = set()
+
+    def give(cid, rid):
+        t = first_act[rid]["t"]
+        out[cid].add(rid)
+        done.add(rid)
+        has_sys[cid].add(system_of(rid))
+        anchors[cid].append(phase_of[rid])
+        if system_of(rid) == "account_service":
+            acct_time[cid] = t
+
+    # pass 0: hand-run deletions - the request's own run happened at the report time itself,
+    # so records the worker touched within minutes of that report belong to it
+    for cid, r in reqs.items():
+        rep_t = parse_ts(r["reported_at"])
+        own = [a for a in run_resources(world, r) if a["resource_id"] in direct.get(cid, {})]
+        if own and not all(abs((a["t"] - rep_t).total_seconds()) <= 1800 for a in own):
+            continue
+        for rid, a in sorted(first_act.items(), key=lambda x: x[1]["t"]):
+            if rid in done or system_of(rid) in has_sys[cid]:
                 continue
-            lo, hi = run_window(r)
-            if not (lo <= t <= hi):
+            if abs((a["t"] - rep_t).total_seconds()) <= 900 and own:
+                give(cid, rid)
+
+    # pass 1: best-first matching against anchored runs
+    pairs = []
+    for rid, a in first_act.items():
+        t = a["t"]
+        for cid in reqs:
+            if not anchors[cid] or not in_window(cid, t):
                 continue
-            at = acct_time.get(cid)
-            gap = (t - at).total_seconds() if at and at <= t else 1e9
-            cands.append((abs((parse_ts(r["reported_at"]) - t).total_seconds()) // 1800, gap, cid))
+            d = max(dist(phase_of[rid], q) for q in anchors[cid])
+            if d <= 1.0:
+                pairs.append((d, bucket(cid, t), gap(cid, t), rid, cid))
+    for d, _, _, rid, cid in sorted(pairs):
+        if rid in done or system_of(rid) in has_sys[cid]:
+            continue
+        # re-check against anchors added since (a claimed record may have refined the run)
+        if max(dist(phase_of[rid], q) for q in anchors[cid]) <= 1.0:
+            give(cid, rid)
+
+    # pass 2: unclaimed records form runs of their own; give each run to an unanchored request.
+    # Actions owned by people with no request in the window seed "foreign" runs, so records
+    # sharing their phase are recognised as someone else's and left alone.
+    used = {a["activity_id"] for cid, r in reqs.items() for a in run_resources(world, r)
+            if a["resource_id"] in direct.get(cid, {})}
+    foreign = set()
+    for a in world.activities:
+        if a["source_system"] != "deletion_worker" or a["activity_id"] in used or a["resource_id"] in first_act:
+            continue
+        rid = a["resource_id"]
+        if rid in phase_of:
+            continue
+        phase_of[rid] = run_phase(world, a, offsets)
+        first_act[rid] = a
+        foreign.add(rid)
+    left = sorted((first_act[rid]["t"], rid) for rid in first_act if rid not in done)
+    clusters: list[list] = []
+    for t, rid in left:
+        best = None
+        for c in clusters:
+            if system_of(rid) in {system_of(x) for _, x in c}:
+                continue
+            if abs((t - c[0][0]).total_seconds()) > 4 * 3600:
+                continue
+            d = min(dist(phase_of[rid], phase_of[x]) for _, x in c)
+            if d <= 1.0 and (best is None or d < best[0]):
+                best = (d, c)
+        if best:
+            best[1].append((t, rid))
+        else:
+            clusters.append([(t, rid)])
+    clusters.sort(key=lambda c: (-len(c), c[0][0]))
+    for c in clusters:
+        if any(rid in foreign for _, rid in c):
+            continue
+        systems = {system_of(x) for _, x in c}
+        t0 = min(t for t, _ in c)
+        cands = [(bucket(cid, t0), gap(cid, t0), cid) for cid in reqs
+                 if not anchors[cid] and not (systems & has_sys[cid]) and all(in_window(cid, t) for t, _ in c)]
         if cands:
-            cands.sort()
-            cid = cands[0][2]
-            out[cid].add(rid)
-            has_sys[cid].add(sysid)
-            if sysid == "account_service":
-                acct_time[cid] = t
+            cid = min(cands)[-1]
+            for _, rid in c:
+                give(cid, rid)
+
+    # pass 3: hand-run deletions logged right at the report time (no fingerprint applies)
+    for t, rid in left:
+        if rid in done or rid in foreign:
+            continue
+        cands = [(abs((parse_ts(reqs[cid]["reported_at"]) - t).total_seconds()), cid) for cid in reqs
+                 if system_of(rid) not in has_sys[cid] and bucket(cid, t) == 0 and in_window(cid, t)]
+        if cands:
+            give(min(cands)[-1], rid)
     return out
 
 
