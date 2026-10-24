@@ -15,7 +15,7 @@ pip install -r requirements.txt          # pymupdf (PDF text), anthropic (option
 
 python code/main.py                      # -> ./output.csv (518 rows), ~15 s
 python code/evaluation/main.py           # score against the 32 public sample answers
-python code/evaluation/behaviour_checks.py   # 12 targeted behaviour checks
+python code/evaluation/behaviour_checks.py   # 19 targeted behaviour checks
 python code/evaluation/run_assignment_check.py --stride 5   # leave-identifiers-out test of run assignment
 ```
 
@@ -60,7 +60,7 @@ requests ──► intent ──► identity ──► discovery ──► state
 | Case status accuracy | 100% (32/32) |
 | Step precision / recall / F1 | 1.000 / 0.984 / 0.992 |
 | Exact sequence match | 91% (29/32) |
-| Behaviour checks | 12/12 |
+| Behaviour checks | 19/19 |
 
 Details, the custom cases, and failures found along the way are in
 [`code/evaluation/evaluation_report.md`](code/evaluation/evaluation_report.md). Token usage is in

@@ -53,7 +53,7 @@ regression set. Each one exercises a different trap.
 | case_61 | Support attachment owned by one person | Object-storage screenshot shows `delivery_confirmation_19.pdf`. The data catalog says it "belongs only to" the requester. Expected: SUPPORT_ATTACHMENT, delete it. | match |
 | case_533 | Not a deletion request | "Please replace [my phone] … and leave the account active". Expected: NOT_APPLICABLE, `[]`. | match |
 
-### 3b. Behaviour checks (`behaviour_checks.py`), 12/12 pass
+### 3b. Behaviour checks (`behaviour_checks.py`), 19/19 pass
 
 | # | Check | Why it matters |
 |---|---|---|
@@ -62,7 +62,16 @@ regression set. Each one exercises a different trap.
 | 5 | Re-auditing a case with an earlier `audit_at` cites no evidence captured after the cut-off | time discipline |
 | 6 | `SIPHO.MOKOENA@GMAIL.COM` resolves to `user_36` | case-insensitive identity |
 | 7 | In case_37 `DISABLE_DATA_FLOW` comes before `DELETE_RECORD` of the record the flow re-creates | safe remediation order |
-| 8-12 | Intent fallback on German, French, Spanish, Japanese texts, including "do not delete" phrasing | multilingual intent |
+| 8 | `account_6345` exists only in evidence_10's read-replica table (primary row deleted); case_105 reports it as a remaining record citing that snapshot | replication drift |
+| 9-10 | `account_1956` (case_215) and `account_8892` (case_335) are recreated only after `audit_at`; both stay verified ABSENT | later evidence must not change the answer |
+| 11 | `account_3064` has a DELETE SUCCESS activity but the lookup at audit returns rows=1; case_165 reports it as remaining | workflow claims are not proof |
+| 12 | case_549 tombstone verified REDACTED and the account ABSENT, both from the audit-day snapshot | tombstone handling |
+| 13 | `support_3802` with its `uploaded_by` hidden is still assigned to case_407 by the run fingerprint | identifier-less records |
+| 14 | every generated deletion request ends with exactly one account | run-assignment sanity |
+| 15-19 | Intent fallback on German, French, Spanish, Japanese texts, including "do not delete" phrasing | multilingual intent |
+
+Checks 8-13 first assert that the trap really exists in the participant data (e.g. the account is
+in the replica table and not the primary), then check the agent's answer, so none can pass vacuously.
 
 ### 3c. Leave-identifiers-out run assignment (`run_assignment_check.py`)
 
@@ -126,7 +135,7 @@ one the account's absence was proven by an older bundle that did not contain the
 7. **Absent accounts had no proof.** Some requests' accounts never appear in a lookup. *Fix:* a
    full snapshot of the account system, captured in the request window, that omits the account
    proves it absent. Snapshots that also hold other records of the same person are preferred.
-8. **Intent fallback missed negated deletion in German and French** (found by checks 8-9).
+8. **Intent fallback missed negated deletion in German and French** (found by the intent-fallback checks).
    *Fix:* negation patterns for de/fr/es/pt/ja/ko are checked before deletion keywords.
 9. **Run-assignment ties were close to guesses.** Nearest-report-time matching sent one record per
    same-minute tie to the wrong request (case_21, 22, 23, 25), and a leave-one-out test on the full

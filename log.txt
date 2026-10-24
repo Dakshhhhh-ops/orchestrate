@@ -171,3 +171,65 @@ branch=main
 repo_root=C:\Users\daksh\OneDrive\Desktop\orchestra
 worktree=main
 parent_agent=none
+
+## [2026-10-24T22:30:00+05:30] Run-assignment v7 and state-reconstruction review (teammate tasks)
+
+User Prompt (verbatim, secrets redacted):
+just better and better
+[cross-session task requests from teammate session orchestra-b2: implement fixes B-D on improve-run-assignment, then review state reconstruction on a stratified sample of generated cases]
+
+Agent Response Summary:
+Implemented and committed run-assignment fixes on improve-run-assignment (3900fac, 3cc4e51, b708dc8): no hand-run pass for fingerprinted runs, phase check in fallbacks, contested singletons dropped, two support records per run, exact-gap run chains and a policy-step time slot. Leave-one-out with identifiers hidden rose to 201/208 = 0.966 (baseline 0.448), hidden uploaded_by labels 6/7, every generated case has exactly one account, samples unchanged at F1 0.992. Then reviewed 20 sampled cases' state decisions against raw evidence: 19 correct, 1 weak evidence citation; replica drift and post-audit recreation traps handled correctly.
+
+Actions:
+* edited code/ghost_audit/audit.py (run-assignment functions) in worktree ../orchestra-ties; rebased onto main 0bc55d4 and d8d0a37
+* ran evaluation/main.py, behaviour_checks.py, run_assignment_check.py and read-only review scripts in a detached worktree
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5
+branch=improve-run-assignment
+repo_root=C:\Users\daksh\OneDrive\Desktop\orchestra-ties
+worktree=C:\Users\daksh\OneDrive\Desktop\orchestra-ties
+parent_agent=orchestra-b2
+
+## [2026-10-24T17:30:00Z] Merge run-assignment v7, state review, tombstone evidence fix
+
+User Prompt (verbatim, secrets redacted):
+(continuation of "just better and better"; driven by teammate session orchestra-95 reports)
+
+Agent Response Summary:
+Merged orchestra-95's run-assignment v7 (b708dc8: leak fixes, exact step-spacing chains, multi-support runs); verified no sample regression, 0 status changes, every generated deletion case now has exactly one account, leave-one-out 0.837 -> 0.966. Acted on orchestra-95's 20-case state-reconstruction review: generic customer_data_* SQL snapshots now prove account absence for the people they hold, fixing the evidence ids of 4 tombstone cases. Added the review as section 3d of the evaluation report and assigned new behaviour checks to orchestra-95.
+
+Actions:
+* git merge --ff-only improve-run-assignment (b708dc8); commits 4e541e2, 4bb8e33, 8cbb284
+* edited code/ghost_audit/evidence.py, code/evaluation/evaluation_report.md, README.md; rebuilt code.zip
+* ran code/main.py, code/evaluation/main.py, behaviour_checks.py (12/12)
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5
+branch=main
+repo_root=C:\Users\daksh\OneDrive\Desktop\orchestra
+worktree=main
+parent_agent=none
+
+## [2026-10-24T22:50:00+05:30] Permanent behaviour checks for verified traps (teammate task)
+
+User Prompt (verbatim, secrets redacted):
+[cross-session task request from teammate session orchestra-b2: turn the hand-verified traps into permanent behaviour checks on a branch from main HEAD]
+
+Agent Response Summary:
+Added seven checks to code/evaluation/behaviour_checks.py covering replica drift, post-audit recreation (two cases), untrusted workflow claims, tombstone redaction with omission proof, run-fingerprint assignment with uploaded_by hidden, and one account per generated deletion case. Each check asserts its trap exists in the participant data before checking the agent's answer. 19/19 pass; committed as 7ac3e9d on branch more-behaviour-checks.
+
+Actions:
+* git checkout -b more-behaviour-checks from main 8cbb284 in worktree ../orchestra-ties
+* edited code/evaluation/behaviour_checks.py; ran it standalone
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5
+branch=more-behaviour-checks
+repo_root=C:\Users\daksh\OneDrive\Desktop\orchestra-ties
+worktree=C:\Users\daksh\OneDrive\Desktop\orchestra-ties
+parent_agent=orchestra-b2
