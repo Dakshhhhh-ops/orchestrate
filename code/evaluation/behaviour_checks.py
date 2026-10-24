@@ -81,7 +81,8 @@ def main():
         return {(s["operation"], s["evidence_id"]) for s in by_case[cid].steps if s["resource_id"] == rid}
 
     # 7. replica drift: account deleted from the primary table but still in the read replica
-    tables = {o.variant: o.present for o in world.by_rid["account_6345"] if o.eid == "evidence_10"}
+    # variant is "<table>" or "<table>/<collection_name>"; the table is what matters here
+    tables = {o.variant.split("/")[0]: o.present for o in world.by_rid["account_6345"] if o.eid == "evidence_10"}
     drift = tables.get("customer_data_read_replica") and "customer_data_primary" not in tables
     check("replica drift: account_6345 only in evidence_10's replica table is a remaining record",
           drift and ("REPORT_REMAINING_RECORD", "evidence_10") in ops_for("case_105", "account_6345"),
