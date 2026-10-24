@@ -211,3 +211,58 @@ one the account's absence was proven by an older bundle that did not contain the
   post-remediation checks carry an empty `evidence_id`.
 - The ±3 h run window was tuned on September samples; on the full year, every worker action on an
   identifier-linked record falls inside it (75 min before to 2 h 10 min after `reported_at`).
+
+## 6. Overfitting checks
+
+The sample metrics in section 1 are **in-sample**: failures on the 32 samples were inspected and
+fixed, so they are a ceiling, not a forecast for the 518 evaluation requests. The checks below
+estimate how the agent behaves on data nobody tuned on.
+
+### 6a. Blind audit of unseen evaluation cases
+
+Eight evaluation requests that had never been inspected (random seed 2026, excluding every case
+touched during development) were re-derived by two independent auditors who saw only
+`problem_statement.md`, the contract and `dataset/`, never the code or `output.csv`.
+
+| Case | Auditor vs agent |
+|---|---|
+| case_121, 129, 189, 355, 401, 427 | identical, every step (status, records, operations, evidence ids) |
+| case_244 | same status, audit record and evidence; the account and analytics record are a coin flip between two same-minute requests for the auditor too |
+| case_349 | identical except the account: the auditor picks `account_9881`, the agent `account_3372` (a same-phase tie on a 30 s cycle, see 6d) |
+
+So 6 of 8 unseen cases match exactly, and every difference sits on an identifier-less record whose
+owner the evidence leaves ambiguous. This is the most honest estimate of hidden-set accuracy we have.
+
+### 6b. Sensitivity of the run-assignment constants
+
+Perturbing the hand-read run-timing constants and counting changed answers over the 518 requests:
+
+| Change | Status changes | Cases with any step change |
+|---|---|---|
+| Phase tolerance ×0.75 | 0 | 2 |
+| Phase tolerance ×1.5 | 0 | 11 |
+| Time windows narrowed 10 min | 0 | 11 |
+| Time windows widened 10 min | 0 | 0 |
+| Time windows removed | 0 | 5 |
+
+The answers do not sit on a knife edge: the tuned constants decide at most about 11 cases.
+
+### 6c. Rule ablation (outside run assignment)
+
+Each rule that was added after looking at samples was switched off in turn.
+
+| Rule switched off | Samples status / step F1 / exact | 518 cases changed | Decision |
+|---|---|---|---|
+| Archive listed with no restore block = restore risk | 100% / 0.992 / 90.6% | 1 | keep (contract: restore paths are a risk) |
+| State only from evidence after the request | 100% / 0.984 / 87.5% | 1 | keep (contract) |
+| Absence proven by a snapshot that omits the record | 100% / 0.984 / 81.2% | 68 | keep |
+| Workflow SUCCESS fills a missing state | no change | 0 | **removed**: dead, and against "claims are not proof" |
+| Recreation by restores / connector syncs | no change | 0 | keep (contract requires it) |
+| Support category from what the workflow tried | 96.9% / 0.979 / 87.5% | 22 | **replaced** by the record's own content (below) |
+| Account and retained-record checks in INCOMPLETE plans | 100% / 0.894 / 31.2% | 342 | keep (answer-format convention in every sample) |
+
+Support categories now come from the stated record type, then the record's own collection
+(`ticket_attachments`, `support_conversations`) or log event (`message_pii_scan`); this decides 154
+of 195 support records, and the workflow-action fallback agrees with it on all 152 records where
+both exist. The output did not change, which shows the old rule was a valid proxy rather than a
+sample-fitted guess.
