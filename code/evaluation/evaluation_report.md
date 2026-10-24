@@ -7,6 +7,10 @@ deletion runs exactly as they would in the real run.
 
 ## 1. Headline metrics (final version)
 
+These are measured on the 32 public samples, which were also used to find and fix failures, so
+they are in-sample. Section 6 gives held-out checks: a blind audit of unseen evaluation cases,
+cross-validated run assignment, sensitivity and ablation.
+
 | Metric | Definition | Score |
 |---|---|---|
 | Case-level status accuracy | `deletion_status` exact match | **100.0%** (32/32) |
