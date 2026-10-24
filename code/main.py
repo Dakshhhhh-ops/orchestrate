@@ -40,14 +40,23 @@ def run(requests: list[dict], world: World | None = None, dataset: Path = ROOT /
         refresh_vision: bool = False, all_requests: list[dict] | None = None):
     world = world or World(dataset, refresh_vision=refresh_vision)
     intents = intent_mod.classify(requests)
-    # run-window assignment needs every request that may compete for the same deletion run
-    pool = all_requests or requests
+    # run-window assignment needs every request that may compete for the same deletion run:
+    # the evaluation requests and the public sample requests live in the same platform history
+    pool = list(all_requests or requests)
+    seen = {r["case_id"] for r in pool}
+    for extra in ("deletion_requests.csv", "sample_deletion_requests.csv"):
+        f = dataset / extra
+        if f.exists():
+            for r in load_requests(f):
+                if r["case_id"] not in seen:
+                    pool.append(r)
+                    seen.add(r["case_id"])
     subjects = {}
     for r in pool:
         s = world.idx.resolve_email(r["email"])
         if s:
             subjects[r["case_id"]] = s
-    pool_intents = intent_mod.classify(pool) if pool is not requests else intents
+    pool_intents = intent_mod.classify(pool)
     del_pool = [r for r in pool if pool_intents[r["case_id"]]["label"] == "DELETION"]
     direct = {r["case_id"]: discover(world, subjects[r["case_id"]], r, parse_ts(r["audit_at"]))
               for r in del_pool if r["case_id"] in subjects}
@@ -107,6 +116,12 @@ def main(argv=None):
     print("status counts:", counts)
     print("model usage:", json.dumps(usage) if usage else "no model calls (offline / cached-only run)")
     (ROOT / "code" / "evaluation").mkdir(parents=True, exist_ok=True)
+    if req_path.name == "deletion_requests.csv":
+        from ghost_audit import usage_report
+
+        n_images = sum(1 for i in world.info.values() if i["path"].lower().endswith((".png", ".jpg", ".jpeg")))
+        usage_report.write(ROOT / "code" / "evaluation" / "usage_report.md", len(results),
+                           len({r["request_text"].strip() for r in requests}), n_images, counts)
     (ROOT / "code" / "evaluation" / "last_run_usage.json").write_text(
         json.dumps({"requests": len(results), "status_counts": counts, "usage": usage,
                     "llm_available": llm.available()}, indent=1), encoding="utf-8")

@@ -32,3 +32,44 @@ branch=main
 repo_root=C:\Users\daksh\OneDrive\Desktop\orchestra
 worktree=main
 parent_agent=none
+
+## [2026-10-24T19:40:00+05:30] Submission count question and leaderboard
+
+User Prompt (verbatim, secrets redacted):
+tell me how many times can we submit here is the leaderboard for now
+[pasted HackerRank Orchestrate leaderboard: 9 participants with chat transcript / AI interview / output CSV / code zip / total scores; countdown 02 days 22 hours to final results; other participants' names redacted as personal data]
+
+Agent Response Summary:
+Explained that neither the starter repo nor the public pages state a submission limit and the HackerRank FAQ linked under the leaderboard is the place to confirm; the leaderboard updates live so a resubmission most likely replaces the earlier score. Noted the contest end (~27 Oct 18:00 IST from the countdown) and that output CSV, code zip and AI interview are where the points are. Continued building.
+
+Actions:
+* saved project memory for the participant repo and deadline
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5
+branch=main
+repo_root=C:\Users\daksh\OneDrive\Desktop\orchestra
+worktree=main
+parent_agent=none
+
+## [2026-10-24T20:05:00+05:30] Keep going until first on the leaderboard
+
+User Prompt (verbatim, secrets redacted):
+you just dont stop as i want to be first on the leaderboard
+
+Agent Response Summary:
+Built the full deletion-audit agent: evidence extraction for SQL/JSON/10 log dialects/text/PDF/screenshots, identity resolution with audit-log history, ownership-based discovery plus deletion-run assignment for identifier-less records, time-bounded state reconstruction with recreation events and absence-by-omission, policy mapping from deletion_rules.csv, and an ordered planner. Iterated against the 32 public samples from step F1 0.83 to 0.97 with 100% status accuracy, added 6 hand-audited custom cases and 12 behaviour checks, wrote README, evaluation and usage reports, and produced output.csv for all 518 requests.
+
+Actions:
+* created code/main.py, code/ghost_audit/*.py, code/prompts/*.md, code/evaluation/*.py
+* read the 11 evidence screenshots and cached their facts in code/cache/image_facts.json
+* ran python code/main.py and python code/evaluation/main.py repeatedly; pushed commits to the participant repo
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5
+branch=main
+repo_root=C:\Users\daksh\OneDrive\Desktop\orchestra
+worktree=main
+parent_agent=none

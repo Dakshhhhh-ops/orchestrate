@@ -235,8 +235,10 @@ def _state(world: World, rid: str, obs: list[Obs], audit_at: datetime, cat: str)
         if a["t"] <= audit_at and (last_t is None or a["t"] > last_t):
             st.present, st.exposed, st.evidence = True, True, a["activity_id"]
             st.notes.append(f"recreated by {a['activity_id']}")
-    if cat == "BACKUP_ARCHIVE" and st.restore is None and st.present:
-        st.restore = None
+    if cat == "BACKUP_ARCHIVE" and st.restore is None and st.present and obs:
+        # the archive holding the subject's data is listed and nothing shows restores are blocked
+        st.restore = True
+        st.notes.append("archive present with no restore block in evidence")
     return st
 
 

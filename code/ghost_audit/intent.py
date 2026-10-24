@@ -33,6 +33,11 @@ NEGATION_PATTERNS = [
     r"don'?t (close|delete)", r"without removing", r"leave (the|my) (account|profile)", r"keep the account",
     r"continue using", r"still (need|want|use)", r"marketing lists only", r"\bonly\b.*marketing",
     r"leave the account active",
+    r"nichts? (zu )?l[öo]sch", r"nicht l[öo]schen",                       # de
+    r"ne (supprimez|supprime|supprimer) pas", r"ne pas supprimer", r"sans supprimer",  # fr
+    r"no (eliminen|borren|eliminar|borrar)", r"sin (eliminar|borrar)",     # es
+    r"n[ãa]o (exclua|apague|excluir|apagar)", r"sem (excluir|apagar)",     # pt
+    r"削除しないで", r"삭제하지 마",                                          # ja/ko
 ]
 NON_DELETE_TOPICS = [
     r"\bcopy of\b", r"\bdownload my\b", r"portable format", r"what personal information", r"\bcorrect\b",
