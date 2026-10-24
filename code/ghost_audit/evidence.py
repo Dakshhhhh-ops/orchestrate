@@ -34,14 +34,14 @@ DIRECT_ID_FIELDS = {
     "full_name", "name", "display_name", "requester_name", "customer_name",
     "email", "requester_email", "owner_email", "customer_email", "contact_email",
     "phone", "requester_phone", "owner_phone", "customer_phone", "email_hash",
-    "matched_value",
+    "matched_value", "uploaded_by",
 }
 # Fields that link a record to a subject without being an exposed identifier on their own
 # (stable internal references are allowed to remain on tombstones / retained records).
 REFERENCE_FIELDS = {"customer_reference", "user_id", "subject_reference", "subject_ref", "subject_selector"}
 LOOKUP_FIELDS = {
     "lookup_key", "match_key", "subject_key", "scan_key", "subject_ref", "correlation_key",
-    "subject_reference", "subject_selector",
+    "subject_reference", "subject_selector", "owner_key",
 }
 
 
@@ -107,7 +107,7 @@ def interpret(rid: str, f: dict, ob: Obs) -> Obs:
     exposed_vals = []
     for k, v in low.items():
         if k in DIRECT_ID_FIELDS and not is_null(v):
-            if k == "matched_value" or k.endswith("email") or k.endswith("phone") or k.endswith("hash") or "name" in k:
+            if k in ("matched_value", "uploaded_by") or k.endswith("email") or k.endswith("phone") or k.endswith("hash") or "name" in k:
                 exposed_vals.append(v)
                 if "name" in k and isinstance(v, str) and "@" not in v and not v.endswith(".pdf"):
                     ob.names.add(norm_name(v))
