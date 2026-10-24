@@ -465,6 +465,10 @@ def assign_run_resources(world: World, requests: list[dict], subjects: dict, dir
         own = [a for a in run_resources(world, r) if a["resource_id"] in direct.get(cid, {})]
         if own and not all(abs((a["t"] - rep_t).total_seconds()) <= 1800 for a in own):
             continue
+        # a run with policy steps (:31/:38/:45/:52 cadence) is a normal fingerprinted run,
+        # not a hand-run deletion, even when those steps fall close to the report time
+        if any(_action_kind(a) == "policy" for a in own):
+            continue
         for rid, a in sorted(first_act.items(), key=lambda x: x[1]["t"]):
             if rid in done or system_of(rid) in has_sys[cid]:
                 continue
@@ -512,7 +516,7 @@ def assign_run_resources(world: World, requests: list[dict], subjects: dict, dir
                 continue
             if abs((t - c[0][0]).total_seconds()) > 4 * 3600:
                 continue
-            d = min(dist(phase_of[rid], phase_of[x]) for _, x in c)
+            d = max(dist(phase_of[rid], phase_of[x]) for _, x in c)
             if d <= 1.0 and (best is None or d < best[0]):
                 best = (d, c)
         if best:
@@ -525,6 +529,13 @@ def assign_run_resources(world: World, requests: list[dict], subjects: dict, dir
             continue
         systems = {system_of(x) for _, x in c}
         t0 = min(t for t, _ in c)
+        if len(c) == 1:
+            # a lone record that also fits another request's anchored run is a coin flip:
+            # leaving it out costs one missed step, a wrong guess costs a missed and a wrong one
+            rid0 = c[0][1]
+            if any(anchors[cid] and in_window(cid, t0) and
+                   max(dist(phase_of[rid0], q) for q in anchors[cid]) <= 1.0 for cid in reqs):
+                continue
         cands = [(bucket(cid, t0), gap(cid, t0), cid) for cid in reqs
                  if not anchors[cid] and not (systems & has_sys[cid]) and all(in_window(cid, t) for t, _ in c)]
         if cands:
@@ -537,7 +548,8 @@ def assign_run_resources(world: World, requests: list[dict], subjects: dict, dir
         if rid in done or rid in foreign:
             continue
         cands = [(abs((parse_ts(reqs[cid]["reported_at"]) - t).total_seconds()), cid) for cid in reqs
-                 if system_of(rid) not in has_sys[cid] and bucket(cid, t) == 0 and in_window(cid, t)]
+                 if system_of(rid) not in has_sys[cid] and bucket(cid, t) == 0 and in_window(cid, t)
+                 and (not anchors[cid] or max(dist(phase_of[rid], q) for q in anchors[cid]) <= 1.0)]
         if cands:
             give(min(cands)[-1], rid)
     return out
