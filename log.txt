@@ -233,3 +233,24 @@ branch=more-behaviour-checks
 repo_root=C:\Users\daksh\OneDrive\Desktop\orchestra-ties
 worktree=C:\Users\daksh\OneDrive\Desktop\orchestra-ties
 parent_agent=orchestra-b2
+
+## [2026-10-24T18:05:00Z] Merge 19 behaviour checks, clean-room reproducibility test
+
+User Prompt (verbatim, secrets redacted):
+(continuation of "just better and better"; driven by teammate session orchestra-95 reports)
+
+Agent Response Summary:
+Reviewed all 31 showcase cases (case_33-63) against their traps; outputs are consistent, and the missing audit records in the evidence_94 family match the unrecoverable sample pattern (ids absent from all participant data). Merged orchestra-95's 7 new behaviour checks (19/19 pass, each asserts its trap exists in the data first), documented them, and verified that code.zip unzipped beside dataset/ reproduces output.csv byte-for-byte. Assigned orchestra-95 an interview-prep brief (scratchpad only).
+
+Actions:
+* git merge --ff-only more-behaviour-checks (7ac3e9d); commit 3e48f8e and usage report refresh
+* edited README.md, code/evaluation/evaluation_report.md; rebuilt code.zip; clean-room run in scratchpad
+* SendMessage to orchestra-95
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5
+branch=main
+repo_root=C:\Users\daksh\OneDrive\Desktop\orchestra
+worktree=main
+parent_agent=none
