@@ -244,118 +244,191 @@ def _visible(obs: list[Obs], audit_at: datetime) -> list[Obs]:
     return [o for o in obs if o.captured <= audit_at and o.ts <= audit_at]
 
 
-def discover(world: World, subj: Subject, req: dict, audit_at: datetime, trace: list) -> dict[str, set]:
-    """Return rid -> set(link reasons) for resources tied to the subject."""
+def run_window(req: dict) -> tuple[datetime, datetime]:
+    """Time span in which the deletion workflow acted for this request."""
+    rep = parse_ts(req["reported_at"])
+    return rep - timedelta(hours=3), rep + timedelta(hours=3)
+
+
+def discover(world: World, subj: Subject, req: dict, audit_at: datetime) -> dict[str, set]:
+    """rid -> link reasons, for resources owned by the subject.
+
+    Ownership (which person a record belongs to) does not change over time, so it is read from
+    all evidence; what the record looked like is decided later from evidence <= audit_at only.
+    """
     tokens = subj.tokens
     linked: dict[str, set] = defaultdict(set)
-    other_emails = set()
-    for rid, obs in world.by_rid.items():
-        vis = _visible(obs, audit_at)
-        if not vis:
-            continue
-        toks = set()
-        names = set()
-        for o in vis:
-            toks |= o.ids | o.keys
-            names |= o.names
+    for rid, toks in world.owner_tokens.items():
         hit = toks & tokens
         if hit:
-            linked[rid].add("identifier:" + ",".join(sorted(h.split(":")[0] for h in hit)))
-            continue
-        if subj.norm_name and subj.norm_name in names:
-            emails = {t for t in toks if t.startswith("email:")}
-            if not emails or emails & tokens:
-                linked[rid].add("name")
-    # catalog links
+            linked[rid].add("identifier:" + ",".join(sorted({h.split(":")[0] for h in hit})))
+    if subj.norm_name:
+        for rid, obs in world.by_rid.items():
+            if rid in linked:
+                continue
+            if any(subj.norm_name in o.names for o in obs):
+                emails = {t for t in world.owner_tokens[rid] if t.startswith("email:")}
+                if not emails or emails & tokens:
+                    linked[rid].add("name")
     for rid, links in world.catalog.items():
         for l in links:
-            if l["t"] <= audit_at and l["tokens"] & tokens:
+            if l["tokens"] & tokens:
                 linked[rid].add("catalog:" + l["aid"])
-    # replica/source links: a document derived from one of the subject's records
+    # derived copies (e.g. search document built from one of the subject's records)
     for rid, obs in world.by_rid.items():
-        for o in _visible(obs, audit_at):
+        for o in obs:
             for k in o.keys:
                 if k.startswith("rid:") and k[4:] in linked and rid not in linked:
                     linked[rid].add("source:" + k[4:])
-    # recreation targets of linked backups / flows
     for rid in list(linked):
         for a in world.act_by_rid.get(rid, []):
             m = RECREATE_RE.search(a["details"])
             if m and a["t"] <= audit_at:
                 linked[m.group(1)].add("recreated_from:" + rid)
-    return linked
-
-
-def run_window(req: dict) -> tuple[datetime, datetime]:
-    rep = parse_ts(req["reported_at"])
-    return rep - timedelta(hours=3), rep + timedelta(hours=3)
-
-
-def assign_run_resources(world: World, requests: list[dict], subjects: dict[str, Subject]) -> dict[str, set]:
-    """Resources acted on by the deletion worker that carry no identifiers anywhere.
-
-    They can only be tied to a request through the deletion run that touched them. Each such
-    resource goes to the request whose run window contains it; ties go to the request whose
-    account deletion happened closest before the action.
-    """
-    unowned = set()
-    for rid, acts in world.act_by_rid.items():
-        if not any(a["source_system"] == "deletion_worker" for a in acts):
-            continue
-        toks = world.owner_tokens.get(rid, set())
-        if not world.idx.owners(toks):
-            unowned.add(rid)
-    acct_time: dict[str, datetime] = {}
-    for r in requests:
-        s = subjects.get(r["case_id"])
-        if not s:
-            continue
-        lo, hi = run_window(r)
-        for a in world.activities:
-            if lo <= a["t"] <= hi and a["event_type"] == "DELETE_RECORD" and a["target_system"] == "account_service":
-                if world.idx.owners(world.owner_tokens.get(a["resource_id"], set())) == {s.user_id}:
-                    acct_time[r["case_id"]] = a["t"]
-    out: dict[str, set] = defaultdict(set)
-    for rid in sorted(unowned):
-        acts = [a for a in world.act_by_rid[rid] if a["source_system"] == "deletion_worker"]
-        t = acts[0]["t"]
-        cands = []
-        for r in requests:
-            if r["case_id"] not in subjects:
-                continue
-            lo, hi = run_window(r)
-            if lo <= t <= hi:
-                at = acct_time.get(r["case_id"])
-                gap = (t - at).total_seconds() if at and at <= t else 1e9
-                cands.append((gap, abs((parse_ts(r["reported_at"]) - t).total_seconds()), r["case_id"]))
-        if cands:
-            cands.sort()
-            out[cands[0][2]].add(rid)
+    # keep only resources that existed in some visible evidence or activity by audit time
+    out = {}
+    for rid, why in linked.items():
+        vis = _visible(world.by_rid.get(rid, []), audit_at)
+        acts = [a for a in world.act_by_rid.get(rid, []) if a["t"] <= audit_at]
+        retained = prefix_of(rid) in ("audit_record", "legal_hold")
+        if vis or acts or retained or any(w.startswith("recreated_from") for w in why):
+            out[rid] = why
     return out
 
 
-def audit_case(world: World, req: dict, subj: Subject | None, intent: dict, run_rids: set) -> CaseResult:
+def run_resources(world: World, req: dict) -> list[dict]:
+    lo, hi = run_window(req)
+    return [a for a in world.activities if lo <= a["t"] <= hi and a["source_system"] == "deletion_worker"]
+
+
+def assign_run_resources(world: World, requests: list[dict], subjects: dict, direct: dict) -> dict[str, set]:
+    """Tie identifier-less resources to requests through the deletion run that touched them.
+
+    A resource the deletion worker acted on, which no evidence links to any known person, is
+    offered to the requests whose run window contains the action. Each request takes at most
+    one such resource per system and only for systems it has no linked record in; ties go to
+    the request whose own account deletion happened closest before the action.
+    """
+    unowned = []
+    for rid, acts in world.act_by_rid.items():
+        dw = [a for a in acts if a["source_system"] == "deletion_worker"]
+        if not dw:
+            continue
+        if world.idx.owners(world.owner_tokens.get(rid, set())):
+            continue
+        unowned.append((dw[0]["t"], rid))
+    # accounts first: the run's own account anchors the timing of the other actions
+    unowned.sort(key=lambda x: (prefix_of(x[1]) != "account", x[0]))
+    acct_time, has_sys = {}, {}
+    for r in requests:
+        cid = r["case_id"]
+        if cid not in subjects:
+            continue
+        linked = direct.get(cid, {})
+        has_sys[cid] = {system_of(x) for x in linked}
+        for a in run_resources(world, r):
+            if a["event_type"] == "DELETE_RECORD" and a["resource_id"] in linked and a["target_system"] == "account_service":
+                acct_time[cid] = a["t"]
+    out: dict[str, set] = defaultdict(set)
+    for t, rid in unowned:
+        sysid = system_of(rid)
+        cands = []
+        for r in requests:
+            cid = r["case_id"]
+            if cid not in subjects or sysid in has_sys.get(cid, set()):
+                continue
+            lo, hi = run_window(r)
+            if not (lo <= t <= hi):
+                continue
+            at = acct_time.get(cid)
+            gap = (t - at).total_seconds() if at and at <= t else 1e9
+            cands.append((abs((parse_ts(r["reported_at"]) - t).total_seconds()) // 1800, gap, cid))
+        if cands:
+            cands.sort()
+            cid = cands[0][2]
+            out[cid].add(rid)
+            has_sys[cid].add(sysid)
+            if sysid == "account_service":
+                acct_time[cid] = t
+    return out
+
+
+def omission_evidence(world: World, subj, system: str, rid: str, since: datetime, audit_at: datetime) -> str:
+    """Latest full snapshot of `system` (captured in [since, audit_at]) that does not contain `rid`.
+
+    Snapshots that also hold other records of the same subject are preferred, because they were
+    clearly taken with this person in scope; otherwise any snapshot listing that system's records.
+    """
+    best = None
+    for eid, systems in SCOPES.items():
+        if system not in systems:
+            continue
+        cap = world.info.get(eid, {}).get("captured")
+        if not cap or cap < since or cap > audit_at:
+            continue
+        obs = world.by_eid.get(eid, [])
+        if any(o.rid == rid for o in obs):
+            continue
+        covers = any(world.owner_tokens.get(o.rid, set()) & subj.tokens for o in obs)
+        has_sys = any(o.system == system for o in obs)
+        if not (covers or has_sys):
+            continue
+        key = (covers, cap)
+        if best is None or key > best[0]:
+            best = (key, eid)
+    return best[1] if best else ""
+
+
+def case_accounts(world: World, req: dict, states: list) -> set:
+    """Accounts that belong in the plan: present ones, plus the one(s) this request's run deleted."""
+    accts = [s for s in states if s.system == "account_service"]
+    run_ids = {a["resource_id"] for a in run_resources(world, req)}
+    keep = {s.rid for s in accts if s.present or s.rid in run_ids or "deletion_run" in s.how_linked}
+    if not keep and accts:
+        # no run evidence: keep the most recently observed account
+        keep = {max(accts, key=lambda s: (s.evidence != "", s.rid)).rid}
+    return keep
+
+
+def audit_case(world: World, req: dict, subj, intent: dict, linked: dict, run_rids: set) -> CaseResult:
     from .planner import build_steps
 
     cid = req["case_id"]
     audit_at = parse_ts(req["audit_at"])
     trace = []
     if intent.get("label") != "DELETION":
-        return CaseResult(cid, "NOT_APPLICABLE", [], subj.user_id if subj else "", intent, [], ["request does not authorise deletion"])
+        return CaseResult(cid, "NOT_APPLICABLE", [], subj.user_id if subj else "", intent, [],
+                          ["request does not authorise deletion"])
     if subj is None:
         trace.append("request email not found in identities; nothing can be verified")
         return CaseResult(cid, "COMPLETE", [], "", intent, [], trace)
-    linked = discover(world, subj, req, audit_at, trace)
+    linked = {k: set(v) for k, v in linked.items()}
     for rid in run_rids:
-        linked[rid].add("deletion_run")
-    states: list[ResourceState] = []
+        linked.setdefault(rid, set()).add("deletion_run")
+    since = parse_ts(req["requested_at"])
+    states = []
     for rid in sorted(linked):
-        obs = _visible(world.by_rid.get(rid, []), audit_at)
-        cat = _category(world, rid, obs, audit_at)
+        vis = _visible(world.by_rid.get(rid, []), audit_at)
+        cat = _category(world, rid, vis, audit_at)
+        # state must be established by evidence gathered after the request was made;
+        # older sightings only describe the record before deletion was asked for
+        obs = [o for o in vis if o.captured >= since]
+        acts = [a for a in world.act_by_rid.get(rid, []) if since <= a["t"] <= audit_at]
+        pfx = prefix_of(rid)
+        if not obs and not acts and pfx not in ("audit_record", "legal_hold", "account")                 and not any(w.startswith("recreated_from") for w in linked[rid]):
+            trace.append(f"{rid}: only seen before the request ({len(vis)} older sightings) - state at audit unknown")
+            continue
         st = _state(world, rid, obs, audit_at, cat)
         st.how_linked = linked[rid]
         if not st.system:
             continue
+        if st.present is None and st.action == "DELETE":
+            eid = omission_evidence(world, subj, st.system, rid, since, audit_at)
+            if eid:
+                st.present, st.exposed, st.evidence = False, False, eid
+                st.notes.append(f"absent from {eid} snapshot of {st.system}")
         states.append(st)
+    keep_accts = case_accounts(world, req, states)
+    states = [s for s in states if s.system != "account_service" or s.rid in keep_accts]
     status, steps = build_steps(states)
     return CaseResult(cid, status, steps, subj.user_id, intent, states, trace)

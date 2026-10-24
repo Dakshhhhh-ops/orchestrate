@@ -25,6 +25,8 @@ DELETE_PATTERNS = [
     r"cancellare", r"cancellazione",                             # it
     r"verwijder",                                                # nl
     r"削除", r"退会", r"삭제", r"탈퇴", r"删除", r"注销",            # ja/ko/zh
+    r"\bis gone\b", r"cannot identify me", r"no longer (identify|point back)", r"\bdeleted\b",
+    r"account (closed|closure)", r"close the account completely",
 ]
 NEGATION_PATTERNS = [
     r"not asking for deletion", r"not a request to (erase|delete)", r"do not (close|delete)",

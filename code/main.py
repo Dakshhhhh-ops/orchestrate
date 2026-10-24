@@ -23,7 +23,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from ghost_audit import intent as intent_mod  # noqa: E402
 from ghost_audit import llm  # noqa: E402
-from ghost_audit.audit import World, assign_run_resources, audit_case  # noqa: E402
+from ghost_audit.audit import World, assign_run_resources, audit_case, discover  # noqa: E402
+from ghost_audit.common import parse_ts  # noqa: E402
 
 
 def natural_key(case_id: str):
@@ -46,12 +47,16 @@ def run(requests: list[dict], world: World | None = None, dataset: Path = ROOT /
         s = world.idx.resolve_email(r["email"])
         if s:
             subjects[r["case_id"]] = s
-    del_pool = [r for r in pool if r["case_id"] not in intents or intents[r["case_id"]]["label"] == "DELETION"]
-    run_assign = assign_run_resources(world, del_pool, subjects)
+    pool_intents = intent_mod.classify(pool) if pool is not requests else intents
+    del_pool = [r for r in pool if pool_intents[r["case_id"]]["label"] == "DELETION"]
+    direct = {r["case_id"]: discover(world, subjects[r["case_id"]], r, parse_ts(r["audit_at"]))
+              for r in del_pool if r["case_id"] in subjects}
+    run_assign = assign_run_resources(world, del_pool, subjects, direct)
     results = []
     for r in requests:
-        results.append(audit_case(world, r, subjects.get(r["case_id"]), intents[r["case_id"]],
-                                  run_assign.get(r["case_id"], set())))
+        cid = r["case_id"]
+        results.append(audit_case(world, r, subjects.get(cid), intents[cid], direct.get(cid, {}),
+                                  run_assign.get(cid, set())))
     results.sort(key=lambda x: natural_key(x.case_id))
     return world, results
 

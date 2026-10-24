@@ -76,7 +76,7 @@ def build_steps(states: list) -> tuple[str, list]:
             # after remediation we still check the account is gone and retained records stayed
             if st.system == "account_service" and st.category == "USER_PROFILE":
                 verification.append(_step("VERIFICATION", st, "VERIFY_RECORD_ABSENT"))
-            elif st.action == "RETAIN" and st.present and st.category != "BACKUP_ARCHIVE":
+            elif st.action == "RETAIN" and st.present is not False and st.category != "BACKUP_ARCHIVE":
                 verification.append(_step("VERIFICATION", st, "VERIFY_RECORD_PRESENT"))
         else:
             op = compliant_check(st)

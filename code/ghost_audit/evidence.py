@@ -295,6 +295,14 @@ def _walk_json(node, ctx: dict, out: list, eid: str, captured: datetime):
         if "resource_id" in node and isinstance(node.get("resource_id"), str):
             rid = node["resource_id"]
             fields = _flatten(node)
+            hits = node.get("hits")
+            if isinstance(hits, dict):
+                for d in hits.get("documents") or []:
+                    if isinstance(d, dict) and d.get("resource_id") in (None, rid):
+                        fields.update(_flatten(d))
+                if str(hits.get("total", "")).isdigit():
+                    fields["total_hits"] = hits["total"]
+                fields.pop("total", None)
             sysid = system_of(rid) or ctx.get("system") or ctx.get("data_store", "")
             ts = parse_ts(node.get("recorded_at") or node.get("observed_at") or ctx.get("captured_at")
                           or ctx.get("recorded_at") or ctx.get("exported_at")) or captured
@@ -303,8 +311,9 @@ def _walk_json(node, ctx: dict, out: list, eid: str, captured: datetime):
             interpret(rid, fields, ob)
             if ob.present is None:
                 ob.present = True
-            if "subject_reference" in node and not is_null(node["subject_reference"]):
-                ob.keys |= identifier_tokens(node["subject_reference"])
+            for k in ("subject_reference", "query", "lookup_key"):
+                if k in node and not is_null(node[k]):
+                    ob.keys |= identifier_tokens(node[k])
             out.append(ob)
             return
         if "data_store" in node and "records" in node:
@@ -429,6 +438,9 @@ def parse_log(path: Path, eid: str, captured: datetime) -> list[Obs]:
         if ev in {"contact_query_completed", "contact_lookup_completed"} and ob.present is None:
             ob.present = True
         if ev == "deletion_marker_check":
+            ob.present = True
+        if ob.present is None and (ev.endswith(("_completed", "_read", "_scan", "_loaded", "_heartbeat", "_evaluated"))
+                                   or ev in {"connector_heartbeat", "record_lookup"}):
             ob.present = True
         if ob.present is None and ob.exposed is None and ob.enabled is None and ob.restore is None:
             continue
