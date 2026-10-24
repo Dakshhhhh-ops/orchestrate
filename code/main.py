@@ -5,8 +5,11 @@ Usage (from the repository root):
     python code/main.py --requests dataset/sample_deletion_requests.csv --output sample_pred.csv
     python code/main.py --refresh-vision      # re-read screenshots with the vision model
 
-Set ANTHROPIC_API_KEY to let Claude classify request intent and read screenshots; without it the
-agent uses its cached model outputs and deterministic fallbacks, so a run never fails for lack of a key.
+Model calls: with GROQ_API_KEY (Groq openai/gpt-oss-120b, used for the final run) or
+ANTHROPIC_API_KEY (Claude) in the environment or an uncommitted .env file, the model classifies
+request intent; with an Anthropic key, --refresh-vision also re-reads the screenshots. Without a
+key the agent replays its cached model outputs and falls back to deterministic rules, so a run
+never fails for lack of a key.
 """
 from __future__ import annotations
 

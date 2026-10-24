@@ -316,3 +316,76 @@ branch=main
 repo_root=C:\Users\daksh\OneDrive\Desktop\orchestra
 worktree=main
 parent_agent=none
+
+## [2026-10-24T17:01:51Z] Overfitting assessment
+
+User Prompt (verbatim, secrets redacted):
+isnt it overfit
+
+Agent Response Summary:
+Assessed overfitting honestly. No case or resource ids are hard-coded in the pipeline, and the run-timing constants are learned or read from identifier-linked data rather than the answer key, but the sample metrics are in-sample (failures were inspected and fixed) and the later leave-one-out gains (0.84 -> 0.99) were tuned against that same metric, so both overstate hidden-set accuracy. A sensitivity test perturbing the run-assignment tolerances and time windows changed 0-11 of 518 cases and no statuses, so the outputs are stable rather than knife-edge.
+
+Actions:
+* grep of pipeline code for hard-coded ids and tuned constants
+* ran scratchpad sensitivity.py offline (5 perturbations of TOL / POLICY_LEAD / ACCOUNT_LEAD / FOLLOWUP_START)
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5
+branch=main
+repo_root=C:\Users\daksh\OneDrive\Desktop\orchestra
+worktree=main
+parent_agent=none
+
+## [2026-10-24T17:16:29Z] Reduce overfitting and measure held-out accuracy
+
+User Prompt (verbatim, secrets redacted):
+make it accurate and not overfit and better
+
+Agent Response Summary:
+Split the work: orchestra-95 is replacing the hand-read run-timing constants with values learned from identifier-linked runs and adding month-wise cross-validation and ablation. This session ablated seven sample-motivated rules outside run assignment, removed a dead claim-based rule, grounded support-record categories in the records' own collection and log events (content now decides 154 of 195; output unchanged), and ran a blind audit where two independent subagents re-derived 8 unseen evaluation cases from raw data only: 6 match exactly, and the differences are identifier-less records whose owner is ambiguous. The case_349 difference suggests the run-timing cycle is 60 s, not 30 s; that lead went to orchestra-95. Added an overfitting-checks section to the evaluation report and marked sample metrics as in-sample.
+
+Actions:
+* scratchpad ablate.py (7 rule ablations on scratch copies), two blind-audit subagents (read-only, dataset only)
+* edited code/ghost_audit/audit.py, code/ghost_audit/evidence.py, code/evaluation/behaviour_checks.py, code/evaluation/evaluation_report.md
+* commits 2eb0244, 090f1ea, 97df31b, 487243a; behaviour_checks 19/19 (a temporary 18/19 from a check precondition was fixed in 090f1ea)
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5
+branch=main
+repo_root=C:\Users\daksh\OneDrive\Desktop\orchestra
+worktree=main
+parent_agent=none
+
+## [2026-10-24T17:18:45Z] SESSION START
+
+tool=Claude Code
+model=claude-opus-5-5
+Repo Root: C:\Users\daksh\OneDrive\Desktop\orchestra
+Branch: main
+Worktree: main
+Parent Agent: none
+Language: py
+Time Remaining: not configured
+
+## [2026-10-24T17:25:27Z] Pre-submission review of the solution
+
+User Prompt (verbatim, secrets redacted):
+review this for hackerrank hackathon orchestran
+
+Agent Response Summary:
+Reviewed the repo against the AGENTS.md contract without changing code. A fresh run reproduces output.csv byte-for-byte; output.csv passes every contract check (518 unique rows, header, op/state/phase rules, evidence timing and empty evidence on future steps); sample eval and 19/19 behaviour checks pass. Main issues: code.zip is stale (audit.py, evidence.py, both reports differ), README and main.py docstring still describe Claude and removed rules while the final run uses Groq, the usage report prices screenshot vision at the Groq rate, the evaluation report cites a missing section 6d, and behaviour_checks.py crashes on a default Windows console. Peer session orchestra-95 is still editing, so repackaging should wait for it.
+
+Actions:
+* python code/main.py --output <scratchpad>/out_fresh.csv (identical to output.csv; rewrote code/evaluation/usage_report.md timestamp)
+* python code/evaluation/main.py; python code/evaluation/behaviour_checks.py (created 5 untracked LLM cache files via .env key)
+* scratchpad contract validator on output.csv; unzip/compare of code.zip vs working tree
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5
+branch=main
+repo_root=C:\Users\daksh\OneDrive\Desktop\orchestra
+worktree=main
+parent_agent=none

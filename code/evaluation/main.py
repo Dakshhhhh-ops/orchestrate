@@ -14,9 +14,16 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import sys
 from collections import Counter
 from pathlib import Path
+
+# evaluation never spends API quota: it replays the cached model replies of the final run and
+# falls back to the rules for anything not cached (GHOST_OFFLINE=0 to allow live calls)
+os.environ.setdefault("GHOST_OFFLINE", "1")
+if os.environ["GHOST_OFFLINE"] == "0":
+    del os.environ["GHOST_OFFLINE"]
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "code"))

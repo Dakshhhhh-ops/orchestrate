@@ -54,9 +54,12 @@ def write(path: Path, n_requests: int, n_distinct_texts: int, n_images: int, sta
     if not fresh:
         est = estimate_offline(n_requests, n_distinct_texts, n_images)
         pi, po = llm.PRICES[llm.MODEL]
+        vpi, vpo = llm.PRICES.get(llm.VISION_MODEL, (pi, po))   # screenshots use the vision model's price
         ib, ii, io = est["intent"]
         vn, vi, vo = est["vision"]
-        cost = (ii + vi) / 1e6 * pi + (io + vo) / 1e6 * po
+        icost = ii / 1e6 * pi + io / 1e6 * po
+        vcost = vi / 1e6 * vpi + vo / 1e6 * vpo
+        cost = icost + vcost
         if not usage:
             lines += ["## Model calls in this run", "",
                       "| Provider | Model | Calls | Input tokens | Output tokens | Total | Cost |",
@@ -68,11 +71,12 @@ def write(path: Path, n_requests: int, n_distinct_texts: int, n_images: int, sta
                       "interactive extraction is not metered here. Everything else in the pipeline is "
                       "deterministic code with zero model tokens.", ""]
         lines += ["## Expected usage of a keyed run (estimate)", "",
-                  f"Pricing used: `{llm.MODEL}` ${pi:.2f} / ${po:.2f} per million input / output tokens.", "",
-                  "| Purpose | Calls | Input tokens | Output tokens | Est. cost (USD) |", "|---|---|---|---|---|",
-                  f"| Intent classification ({n_distinct_texts} distinct texts, 40 per call) | {ib} | {ii:,} | {io:,} | ${(ii / 1e6 * pi + io / 1e6 * po):.4f} |",
-                  f"| Screenshot facts | {vn} | {vi:,} | {vo:,} | ${(vi / 1e6 * pi + vo / 1e6 * po):.4f} |",
-                  f"| **Total** | **{ib + vn}** | **{ii + vi:,}** | **{io + vo:,}** | **${cost:.4f}** |", "",
+                  f"Pricing used: intent `{llm.MODEL}` ${pi:.3f} / ${po:.2f}, screenshots `{llm.VISION_MODEL}` "
+                  f"${vpi:.2f} / ${vpo:.2f} per million input / output tokens.", "",
+                  "| Purpose | Model | Calls | Input tokens | Output tokens | Est. cost (USD) |", "|---|---|---|---|---|---|",
+                  f"| Intent classification ({n_distinct_texts} distinct texts, 40 per call) | `{llm.MODEL}` | {ib} | {ii:,} | {io:,} | ${icost:.4f} |",
+                  f"| Screenshot facts | `{llm.VISION_MODEL}` | {vn} | {vi:,} | {vo:,} | ${vcost:.4f} |",
+                  f"| **Total** | | **{ib + vn}** | **{ii + vi:,}** | **{io + vo:,}** | **${cost:.4f}** |", "",
                   f"- Average per request: {(ii + vi + io + vo) / max(n_requests, 1):,.0f} tokens, ${cost / max(n_requests, 1):.6f}", ""]
     lines += ["## Why the token bill is small", "",
               "- The model is used only where language or pixels must be understood: request intent "

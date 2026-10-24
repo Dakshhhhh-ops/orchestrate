@@ -232,7 +232,7 @@ touched during development) were re-derived by two independent auditors who saw 
 |---|---|
 | case_121, 129, 189, 355, 401, 427 | identical, every step (status, records, operations, evidence ids) |
 | case_244 | same status, audit record and evidence; the account and analytics record are a coin flip between two same-minute requests for the auditor too |
-| case_349 | identical except the account: the auditor picks `account_9881`, the agent `account_3372` (a same-phase tie on a 30 s cycle, see 6d) |
+| case_349 | identical except the account: the auditor picks `account_9881`, the agent `account_3372`. Both accounts sit on the same timing phase; the auditor's 60 s-cycle argument was tested on all identifier-linked runs and does not hold (residuals split evenly into two modes 30 s apart), so this is a genuine coin flip |
 
 So 6 of 8 unseen cases match exactly, and every difference sits on an identifier-less record whose
 owner the evidence leaves ambiguous. This is the most honest estimate of hidden-set accuracy we have.
