@@ -92,9 +92,9 @@ from 203 to 208 records in v7 because the new identifier fields (section 4, item
 records a known owner. Progress on the way: 0.448 → 0.837 (fingerprint) → 0.852 (leak fixes) →
 0.904 (a run may hold a conversation and an attachment) → 0.966 (exact step chains).
 
-A second, independent label source confirms the direction: six support attachments carry an
-`uploaded_by` e-mail that v5 and v6 did not read. With that field hidden, v5 puts 0/7 of them on the
-right request and v7 puts 6/7; the miss is two runs whose fingerprints are 0.8 s apart. The field is
+A second, independent label source confirms the direction: seven support attachments carry an
+`uploaded_by` e-mail that v5 and v6 did not read. With that field hidden, v5 put none of the first six
+measured on the right request and v7 puts 6/7; the miss is two runs whose fingerprints are 0.8 s apart. The field is
 now read as an identifier, so all of them link directly (section 4, item 10).
 
 ### 3d. Hand audit of state decisions on the evaluation set
