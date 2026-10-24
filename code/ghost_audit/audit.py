@@ -307,6 +307,7 @@ PHASE_PERIOD = 30.0          # seconds
 FOLLOWUP_GAPS = (1110.0, 1169.0)   # exact spacing between consecutive follow-up actions of one run
 STEP_DRIFT = 0.5             # each run step lands 0.5 s earlier in the 30 s cycle
 TOL = {"account": 0.5, "policy": 0.8, "other": 0.8}
+MULTI_SYSTEM = "support_platform"   # the only system where one person's run can touch two records
 
 
 def _action_kind(a: dict) -> str:
@@ -482,11 +483,15 @@ def assign_run_resources(world: World, requests: list[dict], subjects: dict, dir
         for cid in reqs:
             if not anchors[cid] or not in_window(cid, t):
                 continue
+            if system_of(rid) in has_sys[cid] and system_of(rid) != MULTI_SYSTEM:
+                continue
             d = max(dist(phase_of[rid], q) for q in anchors[cid])
             if d <= 1.0:
                 pairs.append((d, bucket(cid, t), gap(cid, t), rid, cid))
     for d, _, _, rid, cid in sorted(pairs):
-        if rid in done or system_of(rid) in has_sys[cid]:
+        # one record per system and run, except support: a person can have both a shared
+        # conversation and an attachment of their own in the same deletion run
+        if rid in done or (system_of(rid) in has_sys[cid] and system_of(rid) != MULTI_SYSTEM):
             continue
         # re-check against anchors added since (a claimed record may have refined the run)
         if max(dist(phase_of[rid], q) for q in anchors[cid]) <= 1.0:
