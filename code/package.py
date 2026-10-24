@@ -13,7 +13,7 @@ def main():
         for name in ("README.md", "requirements.txt"):
             z.write(ROOT / name, name)
         for p in sorted((ROOT / "code").rglob("*")):
-            if p.is_dir() or SKIP_DIRS & set(p.parts) or p.suffix.lower() in SKIP_EXT:
+            if p.is_dir() or SKIP_DIRS & set(p.parts) or p.suffix.lower() in SKIP_EXT or p.name.startswith(".env"):
                 continue
             z.write(p, p.relative_to(ROOT).as_posix())
         # the challenge checks for evaluation/<report>.md at the top of the archive

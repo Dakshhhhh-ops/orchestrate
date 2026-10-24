@@ -19,9 +19,12 @@ python code/evaluation/behaviour_checks.py   # 19 targeted behaviour checks
 python code/evaluation/run_assignment_check.py --stride 5   # leave-identifiers-out test of run assignment
 ```
 
-Optional model calls: set `ANTHROPIC_API_KEY` in the environment (never in a file) and run
-`python code/main.py` again. Claude then classifies request intent (batched) and can re-read the
-screenshots with `--refresh-vision`. Every model reply is cached under `code/cache/`, so runs are
+Optional model calls: set `GROQ_API_KEY` (Groq, `openai/gpt-oss-120b`) or `ANTHROPIC_API_KEY`
+(Claude) as an environment variable, or put it in an uncommitted `.env` file at the repository
+root (see `.env.example`; `.env` is git-ignored and never packaged). Then run
+`python code/main.py` again: the model classifies request intent in batches of 40 distinct texts.
+With an Anthropic key, `--refresh-vision` also re-reads the screenshots. `GHOST_PROVIDER` forces a
+provider and `GHOST_MODEL` a model. Every model reply is cached under `code/cache/`, so runs are
 reproducible and a run without a key still completes using the cache and the rule fallbacks.
 
 Useful flags: `--requests <csv>` (audit another request file), `--output <csv>`,

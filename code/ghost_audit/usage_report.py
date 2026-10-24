@@ -30,7 +30,7 @@ def write(path: Path, n_requests: int, n_distinct_texts: int, n_images: int, sta
         tot_in = tot_out = tot_cost = tot_calls = 0
         for m, p in sorted(usage.items()):
             tot = p["input_tokens"] + p["output_tokens"]
-            lines.append(f"| Anthropic | `{m}` | {p['calls']} ({p['fresh_calls']} / {p['cache_hits']}) | {p['input_tokens']:,} | "
+            lines.append(f"| {llm.provider_of(m)} | `{m}` | {p['calls']} ({p['fresh_calls']} / {p['cache_hits']}) | {p['input_tokens']:,} | "
                          f"{p['output_tokens']:,} | {tot:,} | ${p['est_cost_usd']:.4f} | "
                          f"{', '.join(f'{k}: {v}' for k, v in p['purposes'].items())} |")
             tot_in += p["input_tokens"]
@@ -42,7 +42,10 @@ def write(path: Path, n_requests: int, n_distinct_texts: int, n_images: int, sta
                   f"- Average tokens per request: {(tot_in + tot_out) / max(n_requests, 1):,.1f}",
                   f"- Average cost per request: ${tot_cost / max(n_requests, 1):.6f}",
                   "- Token counts are the API's `usage` figures recorded when each reply was first produced; "
-                  "cache hits replay the same figures so the totals describe what the run consumed.", ""]
+                  "cache hits replay the same figures so the totals describe what the run consumed.",
+                  "- Screenshot facts are not in this table: they come from `code/cache/image_facts.json`, read "
+                  f"once during development with `{llm.VISION_MODEL}` vision (not metered here); "
+                  "`--refresh-vision` with an Anthropic key re-reads them.", ""]
     if not fresh:
         est = estimate_offline(n_requests, n_distinct_texts, n_images)
         pi, po = llm.PRICES[llm.MODEL]
@@ -53,8 +56,8 @@ def write(path: Path, n_requests: int, n_distinct_texts: int, n_images: int, sta
             lines += ["## Model calls in this run", "",
                       "| Provider | Model | Calls | Input tokens | Output tokens | Total | Cost |",
                       "|---|---|---|---|---|---|---|",
-                      "| Anthropic | - | 0 | 0 | 0 | 0 | $0.00 |", "",
-                      "No `ANTHROPIC_API_KEY` was configured for this run, so intent came from the rule "
+                      f"| {llm.provider_of(llm.MODEL)} | - | 0 | 0 | 0 | 0 | $0.00 |", "",
+                      "No `GROQ_API_KEY` or `ANTHROPIC_API_KEY` was configured for this run, so intent came from the rule "
                       "classifier and screenshot facts from `code/cache/image_facts.json`. Those facts were "
                       f"extracted once during development with `{llm.VISION_MODEL}` vision, and that "
                       "interactive extraction is not metered here. Everything else in the pipeline is "
