@@ -10,20 +10,20 @@ deletion runs exactly as they would in the real run.
 | Metric | Definition | Score |
 |---|---|---|
 | Case-level status accuracy | `deletion_status` exact match | **100.0%** (32/32) |
-| Step precision | predicted steps that exactly match a gold step (phase, system, resource, operation, state, evidence) | **0.984** |
-| Step recall | gold steps reproduced exactly | **0.959** |
-| Step F1 | | **0.971** |
-| Step F1 ignoring `evidence_id` | same, without the evidence field | 0.971 |
-| Sequence accuracy | whole `steps_json` array identical, order included | **78.1%** (25/32) |
+| Step precision | predicted steps that exactly match a gold step (phase, system, resource, operation, state, evidence) | **1.000** |
+| Step recall | gold steps reproduced exactly | **0.984** |
+| Step F1 | | **0.992** |
+| Step F1 ignoring `evidence_id` | same, without the evidence field | 0.992 |
+| Sequence accuracy | whole `steps_json` array identical, order included | **90.6%** (29/32) |
 
 Field-level accuracy (gold steps aligned to predicted steps on phase + resource + operation):
 
 | step_no | phase | system_id | resource_id | operation | state | evidence_id |
 |---|---|---|---|---|---|---|
-| 93.3% | 95.9% | 95.9% | 95.9% | 95.9% | 95.9% | 95.9% |
+| 95.9% | 98.4% | 98.4% | 98.4% | 98.4% | 98.4% | 98.4% |
 
-Every aligned step has the right evidence id. The 4.1% gap on the other fields is entirely gold
-steps that were not produced (see section 4), not wrong values on produced steps.
+Every produced step is correct (precision 1.0) and every aligned step has the right evidence id. The
+1.6% gap is three gold steps that no participant-visible data can produce (see section 4).
 
 ## 2. Progress across iterations
 
@@ -32,8 +32,9 @@ steps that were not produced (see section 4), not wrong values on produced steps
 | v1 | first end-to-end pipeline | 96.9% | 0.826 | 25.0% |
 | v2 | ownership read from all evidence; support/analytics categories from workflow intent; JSON search hits and lookup queries parsed; log reads count as presence | 100% | 0.890 | 34.4% |
 | v3 | run window narrowed to ±3 h of `reported_at`, accounts assigned first, one record per system per run; retained security records always verified | 100% | 0.958 | 65.6% |
-| v4 | state only from evidence captured after the request; absence proven by full snapshots that omit the record | 100% | **0.971** | **78.1%** |
+| v4 | state only from evidence captured after the request; absence proven by full snapshots that omit the record | 100% | 0.971 | 78.1% |
 | v5 | sample requests join the run-assignment pool; restorable archives without a block are restore risks; multilingual negations in the intent fallback | 100% | 0.971 | 78.1% |
+| v6 | identifier-less records matched to deletion runs by the run's timing fingerprint instead of nearest report time (section 4, item 9) | 100% | **0.992** | **90.6%** |
 
 ## 3. Participant-created evaluation cases
 
@@ -62,6 +63,27 @@ regression set. Each one exercises a different trap.
 | 7 | In case_37 `DISABLE_DATA_FLOW` comes before `DELETE_RECORD` of the record the flow re-creates | safe remediation order |
 | 8-12 | Intent fallback on German, French, Spanish, Japanese texts, including "do not delete" phrasing | multilingual intent |
 
+### 3c. Leave-identifiers-out run assignment (`run_assignment_check.py`)
+
+The samples hold only four run-assignment ties, too few to tune on. This check builds about a
+thousand test cases from the dataset itself, without labels: take a record the deletion worker
+acted on whose owner **is** known from identifiers (and whose action falls in exactly one of that
+owner's request windows), hide its identifiers so it looks anonymised, re-run the assignment and
+check that it goes back to the right request. Every 5th record is tested (203 records, ~3 min).
+
+| Version | Correct owner | account | search | support | analytics | data flow | backup |
+|---|---|---|---|---|---|---|---|
+| v5 nearest report time | 91/203 = **44.8%** | 35/47 | 32/56 | 10/37 | 3/15 | 5/25 | 4/13 |
+| v6 run timing fingerprint | 170/203 = **83.7%** | 39/47 | 51/56 | 25/37 | 14/15 | 21/25 | 12/13 |
+
+Almost every v5 error went to a neighbouring request reported in the same minute. In v6 most
+remaining misses are left unassigned rather than given to the wrong request.
+
+A second, independent label source confirms the direction: six support attachments carry an
+`uploaded_by` e-mail that v5 and v6 did not read. Before that field was parsed, v5 put 0/6 of them
+on the right request and v6 put 4/6. The field is now read as an identifier, so all six link
+directly (section 4, item 11).
+
 ## 4. Failures found and improvements made
 
 1. **Identifier-less records were missed** (v1 recall 0.75). Anonymised analytics rows and 404
@@ -86,22 +108,41 @@ regression set. Each one exercises a different trap.
    proves it absent. Snapshots that also hold other records of the same person are preferred.
 8. **Intent fallback missed negated deletion in German and French** (found by checks 8-9).
    *Fix:* negation patterns for de/fr/es/pt/ja/ko are checked before deletion keywords.
+9. **Run-assignment ties were close to guesses.** Nearest-report-time matching sent one record per
+   same-minute tie to the wrong request (case_21, 22, 23, 25), and a leave-one-out test on the full
+   dataset (3c) showed it returned a hidden record to its true owner only 45% of the time.
+   *Fix:* every action of one deletion run shares the run's timing fingerprint: its time modulo
+   30 s matches the run's account deletion after a fixed per-step drift (0.5 s) and a per-kind
+   offset. The offsets are learned from the 332 run actions whose records carry identifiers, so
+   nothing is hand-labelled. Records are matched best-first to runs whose anchors they fit, records
+   no request claims are grouped into runs by fingerprint, and runs that belong to people with no
+   request are left out instead of guessed.
+10. **Three identifier fields were never read.** A scan of every field in the JSON, SQL and log
+   evidence for values shaped like e-mails, phones, user refs or hashes found `uploaded_by` on
+   ticket attachments, `owner_key` on export-download lookups and `lookup_value` in snapshot
+   bundles (118 values). *Fix:* all three are read as identifiers or link keys. Six attachments now
+   link to their uploader directly, 20 retained audit records are now verified, and four accounts
+   moved to the request whose e-mail looked them up.
+11. **Reports could be missed by a strict packaging check.** `code.zip` held the reports only under
+   `code/evaluation/`. *Fix:* `code/package.py` also writes them to `evaluation/` at the top level.
 
-### Known remaining errors on the samples (7 of 32 not exact)
+### Known remaining errors on the samples (3 of 32 not exact)
 
 - case_18, case_20: the answer key verifies `audit_record_6645` / `audit_record_5569`, which
-  appear in no evidence file and no activity row, so no participant-visible data can recover them.
-- case_21, case_22, case_23, case_25: run-assignment ties. Requests reported in the same minute
-  each had an identifier-less record (an anonymised analytics row or a 404 account), and nothing
-  in the evidence says which belongs to whom. One record per tie lands on the wrong request.
+  appear in no evidence file, no activity row and no PDF text layer, so no participant-visible
+  data can recover them.
 - case_04: `account_004` has no evidence, no activity and no catalog entry at all.
 
 ## 5. Full-dataset sanity checks
 
 - 518 rows, sorted by `case_id`, header `case_id,deletion_status,steps_json`. Every `steps_json`
   is a JSON array with consecutive `step_no` from 1.
-- Status mix: 354 INCOMPLETE, 154 COMPLETE, 10 NOT_APPLICABLE. The 10 not-applicable requests are
+- Status mix: 355 INCOMPLETE, 153 COMPLETE, 10 NOT_APPLICABLE. The 10 not-applicable requests are
   exactly the 10 accounts the privacy intake classified as non-deletion in the activity stream.
   The agent reaches this from the request text alone, and the activity rows confirm it.
 - No cited evidence is captured after its case's `audit_at` (checked by `behaviour_checks.py` and
-  by construction in `audit._visible`).
+  by construction in `audit._visible`). A full scan of the 518 rows confirms all 1,210 cited ids
+  exist, none predates its request, COMPLETE cases cite evidence on every step, and remediation and
+  post-remediation checks carry an empty `evidence_id`.
+- The ±3 h run window was tuned on September samples; on the full year, every worker action on an
+  identifier-linked record falls inside it (75 min before to 2 h 10 min after `reported_at`).

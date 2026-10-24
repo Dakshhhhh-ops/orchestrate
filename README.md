@@ -16,6 +16,7 @@ pip install -r requirements.txt          # pymupdf (PDF text), anthropic (option
 python code/main.py                      # -> ./output.csv (518 rows), ~15 s
 python code/evaluation/main.py           # score against the 32 public sample answers
 python code/evaluation/behaviour_checks.py   # 12 targeted behaviour checks
+python code/evaluation/run_assignment_check.py --stride 5   # leave-identifiers-out test of run assignment
 ```
 
 Optional model calls: set `ANTHROPIC_API_KEY` in the environment (never in a file) and run
@@ -41,7 +42,7 @@ requests ──► intent ──► identity ──► discovery ──► state
 | Screenshots | `documents.py`, `prompts/image_facts.md` | A vision model reads each admin-console screenshot into structured records. Results are cached in `code/cache/image_facts.json`. |
 | Intent | `ghost_audit/intent.py`, `prompts/intent.md` | Claude labels each distinct request text DELETION / NOT_DELETION in batches of 40. A multilingual rule classifier (negations first: "do not close", "nicht löschen", "ne supprimez pas"...) is the fallback and a cross-check. |
 | Identity | `ghost_audit/identity.py` | Current snapshot + `user_audit_log.csv` history gives every e-mail, phone, e-mail hash and the stable `user_id`. Request e-mails match current or historical values, case-insensitively. Near-identical decoys (`g.silva76.jr@` vs `g.silva76@`) never match. |
-| Discovery | `audit.py: discover / assign_run_resources` | A resource belongs to the subject when its evidence carries one of their identifiers, when the data catalog links it, when it is a derived copy of one of their records (`source_resource_id`), or when a restore/connector recreated it from one of their records. Ownership is read from all evidence because it does not change over time. Records with no identifiers left (e.g. an already-anonymised analytics row) are tied to a request through the deletion run that touched them: one per system, closest run first. |
+| Discovery | `audit.py: discover / assign_run_resources` | A resource belongs to the subject when its evidence carries one of their identifiers, when the data catalog links it, when it is a derived copy of one of their records (`source_resource_id`), or when a restore/connector recreated it from one of their records. Ownership is read from all evidence because it does not change over time. Records with no identifiers left (e.g. an already-anonymised analytics row) are tied to a request through the deletion run that touched them. Actions of one run share a timing fingerprint (time mod 30 s, with a fixed per-step drift and per-kind offset learned from identifier-linked runs), so each record goes to the run it fits, one per system per request; records that fit only runs of people with no request are left out. |
 | State | `audit.py: _state` | The state at `audit_at` comes from the latest evidence captured after the request and no later than `audit_at`. A record in any replica table still exists. Workflow results (`SUCCESS`, `COMPLETE`) are treated as claims: they only fill a gap when no evidence covers it. Recreation events after the last observation (restore jobs, active connectors re-populating search, failover sync) bring a record back. A full snapshot that covers the system but omits the record proves it absent. |
 | Policy | `audit.py: _category`, `deletion_rules.csv` | Category comes from the record type in evidence, else from what the deletion workflow tried (a support record the worker tried to DELETE is an attachment; one it tried to REDACT is a shared conversation; a hash-keyed analytics contact is a secondary identifier), else from the resource family. The required action comes from `deletion_rules.csv`. Tombstones keep the `user_id` and must have no direct identifiers. |
 | Plan | `ghost_audit/planner.py` | Findings → remediation → verification, ordered by the operation table then `system_id`, `resource_id`. Flows are disabled and restores blocked before records are changed. COMPLETE cases get evidence-backed checks for every compliant record. INCOMPLETE cases get the full fix plan, plus checks that the account is gone and that retained security/legal records are still present (empty `evidence_id`, since they describe future work). |
@@ -57,8 +58,8 @@ requests ──► intent ──► identity ──► discovery ──► state
 | Metric | Value |
 |---|---|
 | Case status accuracy | 100% (32/32) |
-| Step precision / recall / F1 | 0.984 / 0.959 / 0.971 |
-| Exact sequence match | 78% (25/32) |
+| Step precision / recall / F1 | 1.000 / 0.984 / 0.992 |
+| Exact sequence match | 91% (29/32) |
 | Behaviour checks | 12/12 |
 
 Details, the custom cases, and failures found along the way are in

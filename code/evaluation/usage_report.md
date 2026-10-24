@@ -1,6 +1,6 @@
 # Token usage and cost
 
-Final full-dataset run: 2026-10-24 14:32 UTC, 518 requests, statuses {'INCOMPLETE': 354, 'COMPLETE': 154, 'NOT_APPLICABLE': 10}.
+Final full-dataset run: 2026-10-24 15:12 UTC, 518 requests, statuses {'INCOMPLETE': 355, 'COMPLETE': 153, 'NOT_APPLICABLE': 10}.
 
 ## Model calls in this run
 
