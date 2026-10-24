@@ -60,7 +60,9 @@ def _provider() -> str:
         return "anthropic"
     if os.environ.get("GROQ_API_KEY"):
         return "groq"
-    return "anthropic"
+    # no key: replay the cached replies of the final run (made with Groq), so a key-less run
+    # reproduces the same model labels instead of falling back to the rules
+    return "groq"
 
 
 PROVIDER = _provider()
