@@ -69,7 +69,75 @@ def main():
     check("active connector disabled before the search entry it recreates is deleted",
           ops.index(("DISABLE_DATA_FLOW", "data_flow_2528")) < ops.index(("DELETE_RECORD", "search_1934")), ops)
 
-    # 6. intent rules: non-deletion requests in several languages
+    # --- traps verified by hand against raw evidence (evaluation report 3d) ------------------
+    # One full run of the 518 evaluation requests feeds checks 7-12. Each check first asserts
+    # that the trap really exists in the participant data, then asserts the agent's answer.
+    eval_reqs = agent.load_requests(ROOT / "dataset" / "deletion_requests.csv")
+    _, results = agent.run(eval_reqs, world=world)
+    by_case = {r.case_id: r for r in results}
+    audit_at = {r["case_id"]: agent.parse_ts(r["audit_at"]) for r in eval_reqs}
+
+    def ops_for(cid, rid):
+        return {(s["operation"], s["evidence_id"]) for s in by_case[cid].steps if s["resource_id"] == rid}
+
+    # 7. replica drift: account deleted from the primary table but still in the read replica
+    tables = {o.variant: o.present for o in world.by_rid["account_6345"] if o.eid == "evidence_10"}
+    drift = tables.get("customer_data_read_replica") and "customer_data_primary" not in tables
+    check("replica drift: account_6345 only in evidence_10's replica table is a remaining record",
+          drift and ("REPORT_REMAINING_RECORD", "evidence_10") in ops_for("case_105", "account_6345"),
+          (tables, sorted(ops_for("case_105", "account_6345"))))
+
+    # 8. later-evidence trap: account recreated only after audit_at stays ABSENT at audit_at
+    for cid, rid in (("case_215", "account_1956"), ("case_335", "account_8892")):
+        later = [o for o in world.by_rid[rid] if o.present and o.ts > audit_at[cid]]
+        ops = {op for op, _ in ops_for(cid, rid)}
+        check(f"later evidence ignored: {rid} recreated after {cid}'s audit stays absent",
+              later and "VERIFY_RECORD_ABSENT" in ops and "REPORT_REMAINING_RECORD" not in ops,
+              (len(later), sorted(ops)))
+
+    # 9. claim vs evidence: the workflow says the profile was deleted, the audit-time lookup finds it
+    claimed = [a for a in world.act_by_rid["account_3064"]
+               if a["event_type"] == "DELETE_RECORD" and a["reported_result"] == "SUCCESS"]
+    check("workflow claim not trusted: account_3064 'DELETE SUCCESS' but rows=1 at audit -> remaining",
+          claimed and ("REPORT_REMAINING_RECORD", "evidence_85") in ops_for("case_165", "account_3064"),
+          sorted(ops_for("case_165", "account_3064")))
+
+    # 10. tombstone: stable reference kept, direct identifiers gone, account proven absent
+    c549 = by_case["case_549"]
+    check("tombstone_3963 verified REDACTED and account_4842 ABSENT, both from evidence_52",
+          c549.status == "COMPLETE"
+          and ("VERIFY_RECORD_REDACTED", "evidence_52") in ops_for("case_549", "tombstone_3963")
+          and ("VERIFY_RECORD_ABSENT", "evidence_52") in ops_for("case_549", "account_4842"),
+          (c549.status, [(s["operation"], s["resource_id"], s["evidence_id"]) for s in c549.steps]))
+
+    # 11. run fingerprint: hide the uploaded_by link and let the run timing place the record
+    sys.path.insert(0, str(ROOT / "code" / "evaluation"))
+    import run_assignment_check as rac  # noqa: E402
+    from ghost_audit.audit import assign_run_resources  # noqa: E402
+
+    pool, subjects, direct = rac.build(world)
+    rid = "support_3802"
+    saved = world.owner_tokens.get(rid, set())
+    world.owner_tokens[rid] = set()
+    try:
+        hidden = {c: {k: v for k, v in links.items() if k != rid} for c, links in direct.items()}
+        got = assign_run_resources(world, pool, subjects, hidden)
+    finally:
+        world.owner_tokens[rid] = saved
+    back = next((cid for cid, rs in got.items() if rid in rs), None)
+    check("run fingerprint: support_3802 (uploaded_by hidden) returns to case_407", back == "case_407", back)
+
+    # 12. every generated deletion case audits exactly one account
+    bad = []
+    for r in results:
+        if int(r.case_id.split("_")[1]) < 64 or r.status == "NOT_APPLICABLE":
+            continue
+        accts = {s["resource_id"] for s in r.steps if s["system_id"] == "account_service"}
+        if len(accts) != 1:
+            bad.append((r.case_id, sorted(accts)))
+    check("one account per generated deletion case", not bad, bad[:5])
+
+    # 13. intent rules: non-deletion requests in several languages
     samples = {
         "Bitte nichts löschen, ich möchte nur eine Kopie meiner Daten.": "NOT_DELETION",
         "Je veux seulement corriger mon adresse, ne supprimez pas mon compte.": "NOT_DELETION",
