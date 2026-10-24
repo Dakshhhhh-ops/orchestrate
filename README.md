@@ -81,8 +81,8 @@ log.txt                      agent session log (chat transcript)
 
 ## Packaging
 
-```powershell
-Compress-Archive -Path README.md, requirements.txt, code -DestinationPath code.zip -Force
+```bash
+python code/package.py        # -> code.zip (README, requirements, code/; forward-slash paths)
 ```
 
 `dataset/`, caches of Python bytecode and archives are excluded. No keys or credentials are stored
