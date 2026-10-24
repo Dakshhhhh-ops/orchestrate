@@ -41,7 +41,7 @@ DIRECT_ID_FIELDS = {
 REFERENCE_FIELDS = {"customer_reference", "user_id", "subject_reference", "subject_ref", "subject_selector"}
 LOOKUP_FIELDS = {
     "lookup_key", "match_key", "subject_key", "scan_key", "subject_ref", "correlation_key",
-    "subject_reference", "subject_selector", "owner_key",
+    "subject_reference", "subject_selector", "owner_key", "lookup_value",
 }
 
 
@@ -311,7 +311,7 @@ def _walk_json(node, ctx: dict, out: list, eid: str, captured: datetime):
             interpret(rid, fields, ob)
             if ob.present is None:
                 ob.present = True
-            for k in ("subject_reference", "query", "lookup_key"):
+            for k in ("subject_reference", "query", "lookup_key", "lookup_value"):
                 if k in node and not is_null(node[k]):
                     ob.keys |= identifier_tokens(node[k])
             out.append(ob)
