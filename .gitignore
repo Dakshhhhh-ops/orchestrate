@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+code.zip
+agent-trace/
+agent-trace.zip
+sample_pred.csv
+trace*.json
