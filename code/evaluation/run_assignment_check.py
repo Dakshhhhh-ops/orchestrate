@@ -33,7 +33,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "code"))
-os.environ.setdefault("GHOST_OFFLINE", "1")   # never spend model quota on a check
+os.environ.setdefault("GHOST_OFFLINE", "1")   # never spend model quota on a check; GHOST_OFFLINE=0 opts in
+if os.environ.get("GHOST_OFFLINE") == "0":
+    del os.environ["GHOST_OFFLINE"]
+sys.stdout.reconfigure(encoding="utf-8")
 
 import main as agent  # noqa: E402
 from ghost_audit import intent as intent_mod  # noqa: E402

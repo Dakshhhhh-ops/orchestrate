@@ -4,14 +4,21 @@ Each check builds a small request (or perturbs a real one) and asserts one prope
 challenge cares about. Run from the repository root:
 
     python code/evaluation/behaviour_checks.py
+
+Runs offline by default (cached model replies only); set GHOST_OFFLINE=0 to allow live calls.
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "code"))
+os.environ.setdefault("GHOST_OFFLINE", "1")   # never spend model quota on a check
+if os.environ.get("GHOST_OFFLINE") == "0":
+    del os.environ["GHOST_OFFLINE"]
+sys.stdout.reconfigure(encoding="utf-8")       # test texts include Japanese; plain Windows consoles are cp1252
 
 import main as agent  # noqa: E402
 from ghost_audit.audit import World  # noqa: E402

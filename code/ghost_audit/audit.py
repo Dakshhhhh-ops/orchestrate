@@ -327,22 +327,26 @@ def run_resources(world: World, req: dict) -> list[dict]:
 # fingerprint is hard-coded. `learn_run_model` measures it on runs whose records are already
 # linked to a person by identifiers (no labels, no answer key), using these documented rules:
 #
-#   period      the cycle length P in 2..120 s that best ranks each linked action's own account
+#   period      the cycle length P in 2..300 s that best ranks each linked action's own account
 #               deletion first among the candidate accounts around it (phase distance mod P)
 #   gaps        spacings between consecutive linked steps of one kind that recur at least
-#               max(3, 2 %) times; one skipped step is allowed by also accepting pairwise sums
+#               max(3, 2 %) times; one skipped step is allowed by also accepting the sum of two
+#               different spacings (steps alternate between them)
 #   slots       minute-of-hour values of linked policy steps that recur at least max(3, 2 %)
 #               times; a policy step's position in its run is the index of its nearest slot
-#   drift       least-squares slope of the phase residual against step position, per kind
-#   offset      circular mean of the drift-corrected residual, per kind
+#   step length plain mean of the recurring spacings (consecutive steps alternate), per kind; an
+#               action at position k is projected back k steps to its run's start
+#   offset      circular mean of (account time - projected action time) mod period, per kind
 #   tolerance   99th percentile of |residual - offset| per kind; account deletions get half
 #               a second (timestamps are whole seconds)
 #   time slots  central 98 % of (report - account), (report - policy step) and
 #               (first follow-up - report) on linked runs, widened by MARGIN
 #   window      central 99 % of all linked run actions around the report, widened by MARGIN
-#   multi       systems where at least max(3, 1 %) linked runs touch two records of the system
+#   multi       systems where at least two linked runs touch two records of the system (a
+#               possibility, not a frequency: a single clean example would prove it)
 
 MARGIN = 5 * 60.0       # seconds added on both sides of every learned time range
+PERIOD_CANDIDATES = range(2, 301)
 FLAGS_DEFAULT = {
     "chains": True,          # exact-gap chains: chain pass, same-chain rule, chain-aware clustering
     "slots": True,           # learned time slots for accounts, policy steps and follow-up chains
@@ -359,7 +363,7 @@ class RunModel:
     period: float
     gaps: dict            # kind -> recurring exact gaps between consecutive steps (s)
     slots: tuple          # policy minute-of-hour slots
-    drift: dict           # kind -> seconds of phase drift per step
+    step_len: dict        # kind -> mean spacing of consecutive steps (s)
     offset: dict          # kind -> phase offset to the account deletion
     tol: dict             # kind -> phase tolerance (s)
     account_lead: tuple   # (min, max) seconds before the report
@@ -367,6 +371,7 @@ class RunModel:
     followup_start: tuple # (min, max) seconds after the report
     window: tuple         # (min, max) seconds around the report
     multi: frozenset      # systems that may hold two records in one run
+    period_scores: dict = field(default_factory=dict)
     n_runs: int = 0
     n_actions: int = 0
 
@@ -374,9 +379,10 @@ class RunModel:
         r = lambda x: round(x, 2) if isinstance(x, float) else x  # noqa: E731
         return {
             "period_s": self.period,
-            "gaps_s": {k: list(v) + [f"+sums of two ({len(v) * (len(v) + 1) // 2})"] for k, v in self.gaps.items()},
+            "gaps_s": {k: list(v) + ["+ skip: " + "/".join(str(x + y) for x in v for y in v if x < y)] for k, v in self.gaps.items()},
             "policy_minute_slots": list(self.slots),
-            "drift_s_per_step": {k: r(v) for k, v in self.drift.items()},
+            "step_len_s": {k: r(v) for k, v in self.step_len.items()},
+            "period_rank_scores_top5": self.period_scores,
             "offset_s": {k: r(v) for k, v in self.offset.items()},
             "tolerance_s": {k: r(v) for k, v in self.tol.items()},
             "account_lead_min": [round(x / 60, 1) for x in self.account_lead],
@@ -459,7 +465,9 @@ def _chain_ids(world: World, gaps: dict) -> dict[str, int]:
 
     dw = _dw_actions(world)
     for kind, base in gaps.items():
-        gs = sorted(set(base) | {x + y for x in base for y in base})
+        # steps alternate between the recurring spacings, so one skipped step spans two
+        # different spacings (390 + 449), never the same one twice
+        gs = sorted(set(base) | {x + y for x in base for y in base if x != y})
         acts = [a for a in dw if _action_kind(a) == kind]
         by_t = defaultdict(list)
         for a in acts:
@@ -514,6 +522,18 @@ def learn_run_model(world: World, requests: list[dict], direct: dict) -> RunMode
     minutes = [a["t"].minute for _, acts in runs for a in acts if _action_kind(a) == "policy"]
     slots = tuple(_recurring(minutes, 0.02))
     steps = _steps(world, gaps, slots)
+    # --- step length: plain mean of the recurring spacings (steps alternate between them).
+    # Projecting an action back by k steps puts every step of a run at the run's start time,
+    # whatever the cycle length, so periods can be compared on equal terms below.
+    step_len = {"account": 0.0}
+    for kind in kinds:
+        # consecutive steps alternate between the recurring spacings, so a step advances the run
+        # by their plain mean (390/449 s -> 419.5 s); frequencies depend on where runs start
+        step_len[kind] = sum(gaps[kind]) / len(gaps[kind]) if gaps[kind] else 0.0
+
+    def back(a):
+        return a["t"].timestamp() - step_len.get(_action_kind(a), 0.0) * steps.get(a["activity_id"], 0)
+
     # --- pairs (account action, other action) inside one linked run
     pairs = []
     for _, acts in runs:
@@ -524,47 +544,33 @@ def learn_run_model(world: World, requests: list[dict], direct: dict) -> RunMode
             if _action_kind(a) in kinds:
                 pairs.append((acc[0], a))
     # --- period: best ranking of the true account among nearby linked accounts
-    accounts = [acc for acc, _ in pairs]
-    acc_by_id = {a["activity_id"]: a for a in accounts}
-    acc_list = sorted(acc_by_id.values(), key=lambda a: a["t"])
+    acc_list = sorted({acc["activity_id"]: acc for acc, _ in pairs}.values(), key=lambda a: a["t"])
 
     def rank_score(period):
-        offs = {}
-        for kind in kinds:
-            offs[kind] = _circ_mean([(acc["t"].timestamp() - a["t"].timestamp()) % period
-                                     for acc, a in pairs if _action_kind(a) == kind], period)
+        offs = {kind: _circ_mean([(acc["t"].timestamp() - back(a)) % period
+                                  for acc, a in pairs if _action_kind(a) == kind], period) for kind in kinds}
         hits = n = 0
         for acc, a in pairs:
             cands = [c for c in acc_list if abs((c["t"] - a["t"]).total_seconds()) <= 4 * 3600]
             if len(cands) < 2:
                 continue
-            p = (a["t"].timestamp() + offs[_action_kind(a)]) % period
+            p = (back(a) + offs[_action_kind(a)]) % period
             best = min(cands, key=lambda c: (_circ(c["t"].timestamp() - p, period), abs((c["t"] - a["t"]).total_seconds())))
             hits += best is acc
             n += 1
         return hits / n if n else 0.0
 
-    scores = {p: rank_score(float(p)) for p in range(2, 121)} if pairs else {30: 0.0}
+    scores = {p: rank_score(float(p)) for p in PERIOD_CANDIDATES} if pairs else {30: 0.0}
     period = float(max(scores, key=lambda p: (round(scores[p], 3), -p)))
-    # --- drift, offset, tolerance per kind
-    drift, offset, tol = {"account": 0.0}, {"account": 0.0}, {"account": 0.5}
+    # --- offset and tolerance per kind at the chosen period
+    offset, tol = {"account": 0.0}, {"account": 0.5}
     for kind in kinds:
-        rows = [(steps.get(a["activity_id"], 0), (acc["t"].timestamp() - a["t"].timestamp()) % period)
-                for acc, a in pairs if _action_kind(a) == kind]
-        if not rows:
-            drift[kind], offset[kind], tol[kind] = 0.0, 0.0, 1.0
+        res = [(acc["t"].timestamp() - back(a)) % period for acc, a in pairs if _action_kind(a) == kind]
+        if not res:
+            offset[kind], tol[kind] = 0.0, 1.0
             continue
-        c0 = _circ_mean([r for _, r in rows], period)
-        unwrapped = [(k, ((r - c0 + period / 2) % period) - period / 2) for k, r in rows]
-        mk = sum(k for k, _ in unwrapped) / len(unwrapped)
-        mr = sum(r for _, r in unwrapped) / len(unwrapped)
-        var = sum((k - mk) ** 2 for k, _ in unwrapped)
-        slope = sum((k - mk) * (r - mr) for k, r in unwrapped) / var if var else 0.0
-        drift[kind] = slope     # residual grows by `slope` per step; phase() adds it back
-        corrected = [r - slope * k for k, r in unwrapped]
-        off = sum(corrected) / len(corrected)
-        offset[kind] = (c0 + off) % period
-        tol[kind] = max(0.5, _quantile([abs(x - off) for x in corrected], 0.99))
+        offset[kind] = _circ_mean(res, period)
+        tol[kind] = max(0.5, _quantile([_circ(x - offset[kind], period) for x in res], 0.99))
     # --- time slots and window
     acc_lead, pol_lead, fol_start, window = [], [], [], []
     for r, acts in runs:
@@ -590,8 +596,9 @@ def learn_run_model(world: World, requests: list[dict], direct: dict) -> RunMode
         for s, n in per.items():
             if n >= 2:
                 multi_runs[s] += 1
-    multi = frozenset(s for s, n in multi_runs.items() if n >= max(3, 0.01 * len(runs)))
-    return RunModel(period=period, gaps=gaps, slots=slots, drift=drift, offset=offset, tol=tol,
+    multi = frozenset(s for s, n in multi_runs.items() if n >= 2)
+    return RunModel(period=period, gaps=gaps, slots=slots, step_len=step_len, offset=offset, tol=tol,
+                    period_scores={p: round(scores[p], 4) for p in sorted(scores, key=lambda q: -scores[q])[:5]},
                     account_lead=span(acc_lead, 0.01), policy_lead=span(pol_lead, 0.01),
                     followup_start=span(fol_start, 0.01), window=span(window, 0.005), multi=multi,
                     n_runs=len(runs), n_actions=sum(len(a) for _, a in runs))
@@ -612,7 +619,7 @@ class _Phases:
         """(implied account-deletion phase, tolerance) for one run action."""
         k = _action_kind(a)
         m = self.m
-        raw = a["t"].timestamp() % m.period + m.drift.get(k, 0.0) * self.steps.get(a["activity_id"], 0)
+        raw = (a["t"].timestamp() - m.step_len.get(k, 0.0) * self.steps.get(a["activity_id"], 0)) % m.period
         return (raw + m.offset.get(k, 0.0)) % m.period, m.tol.get(k, 1.0)
 
     def dist(self, p, q) -> float:
@@ -768,11 +775,30 @@ def assign_run_resources(world: World, requests: list[dict], subjects: dict, dir
             d = max(ph.dist(phase_of[rid], q) for q in anchors[cid])
             if d <= 1.0:
                 pairs.append((d, bucket(cid, t), gap(cid, t), rid, cid))
+    # an unclaimed account that no anchored run can still take will start a run of its own
+    # (pass 2); a record that fits such an account better than its anchored run belongs with it
+    accounts = [x for x in first_act if _action_kind(first_act[x]) == "account"]
+    acct_pairs = defaultdict(list)
+    for _, _, _, x, cid in pairs:
+        if x in first_act and _action_kind(first_act[x]) == "account":
+            acct_pairs[x].append(cid)
+
+    def claimable(x):
+        """Can an anchored run still take account x?"""
+        return any(open_for(c, x) and max(ph.dist(phase_of[x], q) for q in anchors[c]) <= 1.0 for c in acct_pairs[x])
+
+    def nearer_seed(rid, d):
+        t = first_act[rid]["t"]
+        return any(x != rid and x not in done and abs((first_act[x]["t"] - t).total_seconds()) <= window_len
+                   and ph.dist(phase_of[rid], phase_of[x]) < d and not claimable(x) for x in accounts)
+
     for d, _, _, rid, cid in sorted(pairs):
         if rid in done or not open_for(cid, rid) or not same_chain(cid, rid):
             continue
-        if max(ph.dist(phase_of[rid], q) for q in anchors[cid]) <= 1.0:
-            give(cid, rid)
+        d_now = max(ph.dist(phase_of[rid], q) for q in anchors[cid])
+        if d_now > 1.0 or nearer_seed(rid, d_now):
+            continue
+        give(cid, rid)
 
     # pass 2: clustering of unclaimed records
     used = {a["activity_id"] for cid in reqs for a in run_cache[cid] if a["resource_id"] in direct.get(cid, {})}
