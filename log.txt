@@ -73,3 +73,22 @@ branch=main
 repo_root=C:\Users\daksh\OneDrive\Desktop\orchestra
 worktree=main
 parent_agent=none
+
+## [2026-10-24T20:20:00+05:30] Expected score estimate
+
+User Prompt (verbatim, secrets redacted):
+wait how much it can score
+
+Agent Response Summary:
+Gave an honest per-component estimate (output CSV ~20-27/30 from 0.97 sample step F1, code zip ~15-24/30, transcript ~6-9/10, AI interview depends on the participant), noting the grading formula is not public and hidden-set accuracy will be lower than on the tuned samples. Recommended interview preparation, a keyed run for real Claude usage, and uploading all four artifacts.
+
+Actions:
+* none (answer only); appended this log entry
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5
+branch=main
+repo_root=C:\Users\daksh\OneDrive\Desktop\orchestra
+worktree=main
+parent_agent=none
