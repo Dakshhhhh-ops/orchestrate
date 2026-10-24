@@ -274,6 +274,9 @@ def parse_sql(path: Path, eid: str, captured: datetime) -> list[Obs]:
             if pfx in t:
                 covered.add(sysid)
         if t.startswith("customer_data_"):
+            # a generic customer-data table holds every system's rows for the people it covers,
+            # so a person present in it with no account row has no account in that store
+            covered.add("account_service")
             for r in con.execute(f'select distinct origin_system from "{t}"'):
                 covered.add(r[0])
     con.close()
