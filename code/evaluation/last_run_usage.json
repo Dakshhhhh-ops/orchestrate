@@ -8,8 +8,8 @@
  "usage": {
   "openai/gpt-oss-120b": {
    "calls": 11,
-   "fresh_calls": 1,
-   "cache_hits": 10,
+   "fresh_calls": 0,
+   "cache_hits": 11,
    "input_tokens": 23301,
    "output_tokens": 7542,
    "purposes": {

@@ -254,3 +254,65 @@ branch=main
 repo_root=C:\Users\daksh\OneDrive\Desktop\orchestra
 worktree=main
 parent_agent=none
+
+## [2026-10-24T18:40:00Z] Add Groq as model provider
+
+User Prompt (verbatim, secrets redacted):
+i have groq
+
+Agent Response Summary:
+Added Groq as a second model provider so the final run can make real, metered model calls: openai/gpt-oss-120b (current Groq production model, $0.15/$0.60 per M tokens per console.groq.com/docs/models) via the OpenAI-compatible API using only the standard library, with rate-limit retries, the existing reply cache and token ledger. Keys load from the environment or an uncommitted, git-ignored .env (created empty for the user; excluded from code.zip). Screenshot facts stay on the cached Claude extraction because Groq lists no vision model. Waiting for the user to paste the key into .env before the keyed run.
+
+Actions:
+* edited code/ghost_audit/llm.py, code/ghost_audit/usage_report.py, code/package.py, README.md; created .env.example and an empty .env
+* web lookup of Groq model list and prices; ran code/main.py offline and behaviour_checks.py (19/19); commit c550819
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5
+branch=main
+repo_root=C:\Users\daksh\OneDrive\Desktop\orchestra
+worktree=main
+parent_agent=none
+
+## [2026-10-24T16:14:54Z] Coordinate remaining work with the other window
+
+User Prompt (verbatim, secrets redacted):
+coordinate with other window
+
+Agent Response Summary:
+Agreed a split with the other window: it owns submission packaging, log.txt and the keyed Groq run; this session validates the transcript format read-only and investigates the remaining run-assignment misses on a separate branch. Ran a read-only validator over log.txt and reported the problems instead of editing the shared file.
+
+Actions:
+* SendMessage coordination with orchestra-b2
+* ran scratchpad check_log.py (read-only) over log.txt
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5
+branch=main
+repo_root=C:\Users\daksh\OneDrive\Desktop\orchestra
+worktree=main
+parent_agent=none
+
+## [2026-10-24T16:55:42Z] Keyed Groq run, intent tie-break, merge final run-assignment fixes
+
+User Prompt (verbatim, secrets redacted):
+done
+
+Agent Response Summary:
+The user put GROQ_API_KEY in the git-ignored .env; the key was checked by length and prefix only and never printed or logged. Ran the full dataset with Groq openai/gpt-oss-120b for request intent: found and fixed duplicate classification (20 -> 10 calls), two sample requests the model misread (prompt clarified), and run-to-run model nondeterminism (added a single-text tie-break vote; majority of model, rules and tie-break decides). Final run: 11 Groq calls, 30.8k tokens, about $0.008; model and rules agree on all 518 evaluation requests and output.csv is unchanged. Merged orchestra-95's last run-assignment fixes (leave-one-out 0.966 -> 0.990, 8 cases changed) and updated the evaluation and usage reports. Note: several earlier entries of this session (stamped 16:40Z-18:40Z) carry estimated times that are later than the real clock; from this entry on, timestamps come from the system clock (UTC).
+
+Actions:
+* ran python code/main.py with Groq (three runs; earlier cache replies kept in the session scratchpad, not deleted)
+* edited code/main.py, code/ghost_audit/intent.py, code/ghost_audit/usage_report.py, code/prompts/intent.md, code/evaluation/evaluation_report.md
+* git cherry-pick 32f56bc; commits b856d38 and the reports commit; rebuilt code.zip
+* GHOST_OFFLINE=1 evaluation (samples 100% / F1 0.992), behaviour_checks 19/19, run_assignment_check 206/208
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5
+branch=main
+repo_root=C:\Users\daksh\OneDrive\Desktop\orchestra
+worktree=main
+parent_agent=none

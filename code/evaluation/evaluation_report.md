@@ -36,6 +36,7 @@ Every produced step is correct (precision 1.0) and every aligned step has the ri
 | v5 | sample requests join the run-assignment pool; restorable archives without a block are restore risks; multilingual negations in the intent fallback | 100% | 0.971 | 78.1% |
 | v6 | identifier-less records matched to deletion runs by the run's timing fingerprint instead of nearest report time (section 4, item 9) | 100% | **0.992** | **90.6%** |
 | v7 | exact step-spacing chains, leak fixes in the fallback passes, `uploaded_by` / `owner_key` / `lookup_value` read as identifiers (items 9-10) | 100% | 0.992 | 90.6% |
+| v8 | chain continuity and time slots in run assignment; Groq intent with tie-break vote (item 13) | 100% | 0.992 | 90.6% |
 
 ## 3. Participant-created evaluation cases
 
@@ -85,16 +86,19 @@ check that it goes back to the right request. Every 5th record is tested (203 re
 |---|---|---|---|---|---|---|---|
 | v5 nearest report time | 91/203 = **44.8%** | 35/47 | 32/56 | 10/37 | 3/15 | 5/25 | 4/13 |
 | v6 run timing fingerprint | 170/203 = 83.7% | 39/47 | 51/56 | 25/37 | 14/15 | 21/25 | 12/13 |
-| v7 + exact step chains, leak fixes, new identifier fields | 201/208 = **96.6%** | 49/51 | 54/56 | 37/38 | 15/15 | 24/25 | 13/13 |
+| v7 + exact step chains, leak fixes, new identifier fields | 201/208 = 96.6% | 49/51 | 54/56 | 37/38 | 15/15 | 24/25 | 13/13 |
+| v8 + chain continuity, account and follow-up time slots | 206/208 = **99.0%** | 50/51 | 56/56 | 38/38 | 15/15 | 25/25 | 13/13 |
 
 Almost every v5 error went to a neighbouring request reported in the same minute. The test set grows
 from 203 to 208 records in v7 because the new identifier fields (section 4, item 10) give more
 records a known owner. Progress on the way: 0.448 → 0.837 (fingerprint) → 0.852 (leak fixes) →
-0.904 (a run may hold a conversation and an attachment) → 0.966 (exact step chains).
+0.904 (a run may hold a conversation and an attachment) → 0.966 (exact step chains) → 0.990
+(chain continuity and time slots). The last two misses are true ties: two requests reported in the
+same minute whose runs have the same timing phase.
 
 A second, independent label source confirms the direction: seven support attachments carry an
 `uploaded_by` e-mail that v5 and v6 did not read. With that field hidden, v5 put none of the first six
-measured on the right request and v7 puts 6/7; the miss is two runs whose fingerprints are 0.8 s apart. The field is
+measured on the right request, v7 puts 6/7 and v8 puts 7/7. The field is
 now read as an identifier, so all of them link directly (section 4, item 10).
 
 ### 3d. Hand audit of state decisions on the evaluation set
@@ -153,6 +157,10 @@ one the account's absence was proven by an older bundle that did not contain the
    spaced exactly 390/449 s (policy steps) or 1110/1169 s (follow-ups), so a record chained to an
    already-linked step joins that run; and policy steps run 0-35 min before their report.
    Afterwards every generated deletion case has exactly one account (two had none before).
+   A last pass on the remaining misses added four checked regularities, each measured first on the
+   identifier-linked runs: a run's follow-ups never span two exact-gap chains, accounts are deleted
+   40-80 min before the report, follow-up chains start 30-90 min after it, and a group no request
+   can take whole is retried record by record. Leave-one-out reached 0.990.
 10. **Three identifier fields were never read.** A scan of every field in the JSON, SQL and log
    evidence for values shaped like e-mails, phones, user refs or hashes found `uploaded_by` on
    ticket attachments, `owner_key` on export-download lookups and `lookup_value` in snapshot
