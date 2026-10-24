@@ -163,7 +163,17 @@ def _category(world: World, rid: str, obs: list[Obs], audit_at: datetime) -> str
             if rt == "SUPPORT_MESSAGE" and pfx != "support":
                 continue
             return rt
-    # what the deletion workflow itself tried to do is a strong hint of the policy category
+    # the record's own container or log event says what it is (ticket_attachments,
+    # support_conversations, message_pii_scan, ...)
+    if pfx == "support":
+        for o in reversed(obs):
+            v = f"{o.variant or ''} {o.note or ''}".lower()
+            if "attachment" in v:
+                return "SUPPORT_ATTACHMENT"
+            if "conversation" in v or "message" in v:
+                return "SUPPORT_MESSAGE"
+    # last resort: what the deletion workflow tried to do. On every record that states its own
+    # type, this agrees with it (31 conversations -> REDACT, 7 attachments -> DELETE).
     for a in reversed(world.act_by_rid.get(rid, [])):
         if a["t"] > audit_at or a["source_system"] != "deletion_worker":
             continue
@@ -224,10 +234,7 @@ def _state(world: World, rid: str, obs: list[Obs], audit_at: datetime, cat: str)
             st.enabled, st.evidence = True, a["activity_id"]
         if et == "CHECK_RESTORE_ACCESS" and "can still be restored" in a["details"]:
             st.restore, st.evidence = True, a["activity_id"]
-        if st.enabled is None and et == "DISABLE_DATA_FLOW" and res == "SUCCESS":
-            st.enabled, st.evidence = False, a["activity_id"]
-        if st.restore is None and et == "BLOCK_RESTORE" and res == "SUCCESS":
-            st.restore, st.evidence = False, a["activity_id"]
+        # a workflow "SUCCESS" is a claim, never proof of a compliant state, so it sets nothing
         if et == "RESTORE_BACKUP":
             st.restore, st.evidence = True, a["activity_id"]
     # recreation after the last observation: the record is back

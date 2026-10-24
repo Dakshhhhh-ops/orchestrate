@@ -257,7 +257,8 @@ def parse_sql(path: Path, eid: str, captured: datetime) -> list[Obs]:
                     pass
             sysid = system_of(rid) or fields.get("origin_system", "")
             ts = scope.get(sysid) or captured
-            ob = Obs(eid, captured, ts, rid, sysid, variant=t, source="sql")
+            variant = f"{t}/{rec['collection_name']}" if rec.get("collection_name") else t
+            ob = Obs(eid, captured, ts, rid, sysid, variant=variant, source="sql")
             interpret(rid, fields, ob)
             if ob.present is None:
                 ob.present = True
