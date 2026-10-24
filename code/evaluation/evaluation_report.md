@@ -167,6 +167,17 @@ one the account's absence was proven by an older bundle that did not contain the
    not treated as covering the account service. *Fix:* such tables cover the account service for
    the people they hold; the four cases now cite the audit-day snapshot, as sample case_31 does.
 
+13. **The model read two deletion requests as something else** (found by comparing model and rule
+   labels on the samples). With the first prompt, Groq `gpt-oss-120b` called a request to remove a
+   profile while keeping a shared conversation a "cleanup" (case_19), and a follow-up asking whether
+   a failed deletion really removed the data a "status inquiry" (case_25). *Fix:* the prompt now
+   says that partial deletion and follow-ups on a deletion are still deletion requests, because the
+   policy, not the requester, decides what is deleted, redacted or kept. A repeat run then showed
+   the model is not fully deterministic even at temperature 0 (case_19 flipped back once). *Second
+   fix:* when the model and the rules disagree, the model is asked again about that text alone with
+   more reasoning and the majority of the three votes decides. In the final run that tie-break
+   fired once (case_19: model NOT_DELETION, rules DELETION, second model vote DELETION).
+
 ### Known remaining errors on the samples (3 of 32 not exact)
 
 - case_18, case_20: the answer key verifies `audit_record_6645` / `audit_record_5569`, which
@@ -181,6 +192,11 @@ one the account's absence was proven by an older bundle that did not contain the
 - Status mix: 355 INCOMPLETE, 153 COMPLETE, 10 NOT_APPLICABLE. The 10 not-applicable requests are
   exactly the 10 accounts the privacy intake classified as non-deletion in the activity stream.
   The agent reaches this from the request text alone, and the activity rows confirm it.
+- Intent was judged twice and independently: by the model (Groq `openai/gpt-oss-120b`, batches of
+  40 distinct texts, see `usage_report.md`) and by the multilingual rule classifier. They agree on
+  all 518 requests (English, plus about a dozen each in French, Spanish, Portuguese, Japanese and
+  Korean) and on all 32 samples, and the keyed run's `output.csv` is byte-identical to the
+  rule-only run.
 - No cited evidence is captured after its case's `audit_at` (checked by `behaviour_checks.py` and
   by construction in `audit._visible`). A full scan of the 518 rows confirms all 1,210 cited ids
   exist, none predates its request, COMPLETE cases cite evidence on every step, and remediation and

@@ -1,9 +1,10 @@
 """Does the request text authorise deletion?
 
-Primary path: Claude reads the requests in batches (prompt: code/prompts/intent.md) and returns
+Primary path: the model reads the requests in batches (prompt: code/prompts/intent.md) and returns
 one label per request. Fallback path (no API key, refusal, unparsable reply): a multilingual
-rule classifier. Both are cached/deterministic. Final label = LLM label when present, and the
-rule label is kept alongside for the evaluation report.
+rule classifier. Final label = model label when it agrees with the rules; on disagreement the
+model is asked again about that text alone (more reasoning) and the majority of the three votes
+wins. Model replies are cached, so a re-run reproduces the same labels.
 """
 from __future__ import annotations
 
@@ -87,4 +88,22 @@ def classify(requests: list[dict], batch_size: int = 40) -> dict[str, dict]:
                 continue
             for cid in uniq[item["text"]]:
                 out[cid].update({"label": res["label"], "reason": res.get("reason", ""), "source": "llm"})
+    # Tie-break: when the batch model vote and the rule vote disagree, ask the model again about
+    # that text alone with more reasoning, and take the majority of the three votes. Model replies
+    # are not fully deterministic, so one vote should not decide a borderline request.
+    for text in texts:
+        first = out[uniq[text][0]]
+        if first["source"] != "llm" or first["label"] == first["rule_label"]:
+            continue
+        reply = llm.call(system, json.dumps([{"id": "r0", "text": text}], ensure_ascii=False),
+                         purpose="intent_tiebreak", max_tokens=4096, effort="medium")
+        parsed = llm.parse_json_reply(reply)
+        res = (parsed.get("results", parsed) if isinstance(parsed, dict) else {}).get("r0")
+        votes = [first["label"], first["rule_label"]]
+        if isinstance(res, dict) and res.get("label") in ("DELETION", "NOT_DELETION"):
+            votes.append(res["label"])
+        final = max(set(votes), key=votes.count) if len(votes) == 3 else first["rule_label"]
+        for cid in uniq[text]:
+            out[cid].update({"label": final, "source": "llm+tiebreak", "votes": votes,
+                             "reason": res.get("reason", first["reason"]) if isinstance(res, dict) else first["reason"]})
     return out

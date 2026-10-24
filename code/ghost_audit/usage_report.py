@@ -39,6 +39,11 @@ def write(path: Path, n_requests: int, n_distinct_texts: int, n_images: int, sta
             tot_calls += p["calls"]
         lines += [f"| **All models** | | **{tot_calls}** | **{tot_in:,}** | **{tot_out:,}** | **{tot_in + tot_out:,}** | "
                   f"**${tot_cost:.4f}** | |", "",
+                  "- Prices used (USD per million input / output tokens): "
+                  + "; ".join(f"`{m}` ${llm.PRICES.get(m, (0, 0))[0]:.3f} / ${llm.PRICES.get(m, (0, 0))[1]:.2f}"
+                              for m in sorted(usage)) + " (Groq: console.groq.com/docs/models; Anthropic list prices).",
+                  "- The intent batches cover every distinct request text in the 518 evaluation requests and the "
+                  "32 public samples, which the run audits together; averages are over the 518 requests.",
                   f"- Average tokens per request: {(tot_in + tot_out) / max(n_requests, 1):,.1f}",
                   f"- Average cost per request: ${tot_cost / max(n_requests, 1):.6f}",
                   "- Token counts are the API's `usage` figures recorded when each reply was first produced; "

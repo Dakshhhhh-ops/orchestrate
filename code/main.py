@@ -39,7 +39,6 @@ def load_requests(path: Path) -> list[dict]:
 def run(requests: list[dict], world: World | None = None, dataset: Path = ROOT / "dataset",
         refresh_vision: bool = False, all_requests: list[dict] | None = None):
     world = world or World(dataset, refresh_vision=refresh_vision)
-    intents = intent_mod.classify(requests)
     # run-window assignment needs every request that may compete for the same deletion run:
     # the evaluation requests and the public sample requests live in the same platform history
     pool = list(all_requests or requests)
@@ -56,7 +55,12 @@ def run(requests: list[dict], world: World | None = None, dataset: Path = ROOT /
         s = world.idx.resolve_email(r["email"])
         if s:
             subjects[r["case_id"]] = s
+    # one classification over the whole pool: each distinct text is judged once
     pool_intents = intent_mod.classify(pool)
+    missing = [r for r in requests if r["case_id"] not in pool_intents]
+    if missing:
+        pool_intents.update(intent_mod.classify(missing))
+    intents = {r["case_id"]: pool_intents[r["case_id"]] for r in requests}
     del_pool = [r for r in pool if pool_intents[r["case_id"]]["label"] == "DELETION"]
     direct = {r["case_id"]: discover(world, subjects[r["case_id"]], r, parse_ts(r["audit_at"]))
               for r in del_pool if r["case_id"] in subjects}

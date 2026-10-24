@@ -5,6 +5,19 @@
   "COMPLETE": 153,
   "NOT_APPLICABLE": 10
  },
- "usage": {},
- "llm_available": false
+ "usage": {
+  "openai/gpt-oss-120b": {
+   "calls": 11,
+   "fresh_calls": 1,
+   "cache_hits": 10,
+   "input_tokens": 23301,
+   "output_tokens": 7542,
+   "purposes": {
+    "intent": 10,
+    "intent_tiebreak": 1
+   },
+   "est_cost_usd": 0.00802
+  }
+ },
+ "llm_available": true
 }

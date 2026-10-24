@@ -1,0 +1,7 @@
+{
+ "model": "openai/gpt-oss-120b",
+ "purpose": "intent_tiebreak",
+ "text": "{\"results\":{\"r0\":{\"label\":\"DELETION\",\"reason\":\"Wants profile and personal data removed\"}}}",
+ "input_tokens": 460,
+ "output_tokens": 157
+}
