@@ -88,6 +88,22 @@ A second, independent label source confirms the direction: six support attachmen
 right request and v7 puts 6/7; the miss is two runs whose fingerprints are 0.8 s apart. The field is
 now read as an identifier, so all of them link directly (section 4, item 10).
 
+### 3d. Hand audit of state decisions on the evaluation set
+
+Twenty generated evaluation cases (fixed seed, 10 COMPLETE and 10 INCOMPLETE) were checked by hand
+against the raw evidence at their `audit_at`: right snapshot chosen, replica drift handled, later
+evidence ignored, workflow claims not trusted, omission proofs valid. 19 were fully correct; in
+one the account's absence was proven by an older bundle that did not contain the person, now fixed
+(section 4, item 12). Dataset-wide checks from the same review:
+
+- 12 snapshots hold an account only in a replica table after the primary row was deleted. All 12
+  are reported as remaining records, citing that snapshot (as in sample case_16).
+- 291 ABSENT decisions rest on a snapshot that omits the record. 58 are later confirmed by an
+  explicit sighting. Two (case_215, case_335) are recreated only after `audit_at`, a deliberate
+  "later evidence must not change the answer" trap that the agent passes.
+- 151 of the omission-proven accounts had FAILED or PARTIAL delete claims, so the workflow
+  result was correctly not taken as proof either way.
+
 ## 4. Failures found and improvements made
 
 1. **Identifier-less records were missed** (v1 recall 0.75). Anonymised analytics rows and 404
@@ -136,6 +152,11 @@ now read as an identifier, so all of them link directly (section 4, item 10).
    moved to the request whose e-mail looked them up.
 11. **Reports could be missed by a strict packaging check.** `code.zip` held the reports only under
    `code/evaluation/`. *Fix:* `code/package.py` also writes them to `evaluation/` at the top level.
+12. **Account absence cited from a file without the person** (found by the hand audit, 3d). Four
+   tombstone cases proved the account absent from an earlier bundle that holds none of their
+   records, because the audit-day failover snapshot is a generic `customer_data_*` table and was
+   not treated as covering the account service. *Fix:* such tables cover the account service for
+   the people they hold; the four cases now cite the audit-day snapshot, as sample case_31 does.
 
 ### Known remaining errors on the samples (3 of 32 not exact)
 
