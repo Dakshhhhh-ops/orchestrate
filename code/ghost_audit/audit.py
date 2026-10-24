@@ -308,6 +308,42 @@ FOLLOWUP_GAPS = (1110.0, 1169.0)   # exact spacing between consecutive follow-up
 STEP_DRIFT = 0.5             # each run step lands 0.5 s earlier in the 30 s cycle
 TOL = {"account": 0.5, "policy": 0.8, "other": 0.8}
 MULTI_SYSTEM = "support_platform"   # the only system where one person's run can touch two records
+POLICY_GAPS = (390.0, 449.0, 839.0)            # exact spacing between policy steps of one run
+CHAIN_GAPS = {"policy": POLICY_GAPS, "other": FOLLOWUP_GAPS + (2279.0,)}
+POLICY_LEAD = (0.0, 35 * 60.0)                 # policy steps run in the half hour before the report
+
+
+def run_chains(world: World) -> dict[str, int]:
+    """Group deletion-worker actions into runs by their exact spacing.
+
+    Steps of one run are spaced exactly 390/449 s (policy) or 1110/1169 s (follow-ups), so two
+    actions at exactly such a gap belong to the same run. Returns activity_id -> chain id.
+    """
+    if hasattr(world, "_chains"):
+        return world._chains
+    parent: dict[str, str] = {}
+
+    def find(x):
+        while parent.setdefault(x, x) != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    dw = [a for a in world.activities if a["source_system"] == "deletion_worker"]
+    for kind, gaps in CHAIN_GAPS.items():
+        acts = [a for a in dw if _action_kind(a) == kind]
+        by_t = defaultdict(list)
+        for a in acts:
+            by_t[a["t"]].append(a)
+        for a in acts:
+            for g in gaps:
+                for b in by_t.get(a["t"] - timedelta(seconds=g), []):
+                    parent[find(a["activity_id"])] = find(b["activity_id"])
+    ids, out = {}, {}
+    for a in dw:
+        out[a["activity_id"]] = ids.setdefault(find(a["activity_id"]), len(ids))
+    world._chains = out
+    return out
 
 
 def _action_kind(a: dict) -> str:
@@ -432,9 +468,14 @@ def assign_run_resources(world: World, requests: list[dict], subjects: dict, dir
                 acct_time[cid] = a["t"]
             anchors[cid].append(run_phase(world, a, offsets))
 
-    def in_window(cid, t):
+    def in_window(cid, t, rid=None):
         lo, hi = run_window(reqs[cid])
-        return lo <= t <= hi
+        if not (lo <= t <= hi):
+            return False
+        if rid is not None and rid in first_act and _action_kind(first_act[rid]) == "policy":
+            lead = (parse_ts(reqs[cid]["reported_at"]) - t).total_seconds()
+            return POLICY_LEAD[0] <= lead <= POLICY_LEAD[1]
+        return True
 
     def bucket(cid, t):
         return abs((parse_ts(reqs[cid]["reported_at"]) - t).total_seconds()) // 1800
@@ -459,6 +500,25 @@ def assign_run_resources(world: World, requests: list[dict], subjects: dict, dir
         if system_of(rid) == "account_service":
             acct_time[cid] = t
 
+    # chain pass: a record whose exact-gap chain contains a step already linked to one request
+    # is part of that request's run
+    chains = run_chains(world)
+    chain_owner: dict[int, set] = defaultdict(set)
+    for cid, r in reqs.items():
+        for a in run_resources(world, r):
+            if a["resource_id"] in direct.get(cid, {}):
+                chain_owner[chains[a["activity_id"]]].add(cid)
+    for rid, a in sorted(first_act.items(), key=lambda x: x[1]["t"]):
+        owners = chain_owner.get(chains.get(a["activity_id"]), set())
+        if len(owners) != 1:
+            continue
+        cid = next(iter(owners))
+        if rid in done or not in_window(cid, a["t"], rid):
+            continue
+        if system_of(rid) in has_sys[cid] and system_of(rid) != MULTI_SYSTEM:
+            continue
+        give(cid, rid)
+
     # pass 0: hand-run deletions - the request's own run happened at the report time itself,
     # so records the worker touched within minutes of that report belong to it
     for cid, r in reqs.items():
@@ -481,7 +541,7 @@ def assign_run_resources(world: World, requests: list[dict], subjects: dict, dir
     for rid, a in first_act.items():
         t = a["t"]
         for cid in reqs:
-            if not anchors[cid] or not in_window(cid, t):
+            if not anchors[cid] or not in_window(cid, t, rid):
                 continue
             if system_of(rid) in has_sys[cid] and system_of(rid) != MULTI_SYSTEM:
                 continue
@@ -538,11 +598,14 @@ def assign_run_resources(world: World, requests: list[dict], subjects: dict, dir
             # a lone record that also fits another request's anchored run is a coin flip:
             # leaving it out costs one missed step, a wrong guess costs a missed and a wrong one
             rid0 = c[0][1]
-            if any(anchors[cid] and in_window(cid, t0) and
-                   max(dist(phase_of[rid0], q) for q in anchors[cid]) <= 1.0 for cid in reqs):
+            sys0 = system_of(rid0)
+            # only runs that could still take this record compete (one account per run, etc.)
+            if any(anchors[cid] and in_window(cid, t0, rid0)
+                   and (sys0 not in has_sys[cid] or sys0 == MULTI_SYSTEM)
+                   and max(dist(phase_of[rid0], q) for q in anchors[cid]) <= 1.0 for cid in reqs):
                 continue
         cands = [(bucket(cid, t0), gap(cid, t0), cid) for cid in reqs
-                 if not anchors[cid] and not (systems & has_sys[cid]) and all(in_window(cid, t) for t, _ in c)]
+                 if not anchors[cid] and not (systems & has_sys[cid]) and all(in_window(cid, t, x) for t, x in c)]
         if cands:
             cid = min(cands)[-1]
             for _, rid in c:
@@ -553,7 +616,7 @@ def assign_run_resources(world: World, requests: list[dict], subjects: dict, dir
         if rid in done or rid in foreign:
             continue
         cands = [(abs((parse_ts(reqs[cid]["reported_at"]) - t).total_seconds()), cid) for cid in reqs
-                 if system_of(rid) not in has_sys[cid] and bucket(cid, t) == 0 and in_window(cid, t)
+                 if system_of(rid) not in has_sys[cid] and bucket(cid, t) == 0 and in_window(cid, t, rid)
                  and (not anchors[cid] or max(dist(phase_of[rid], q) for q in anchors[cid]) <= 1.0)]
         if cands:
             give(min(cands)[-1], rid)
