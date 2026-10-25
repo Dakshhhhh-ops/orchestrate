@@ -1,6 +1,6 @@
 # Token usage and cost
 
-Final full-dataset run: 2026-10-24 16:45 UTC, 518 requests, statuses {'INCOMPLETE': 355, 'COMPLETE': 153, 'NOT_APPLICABLE': 10}.
+Final full-dataset run: 2026-10-25 13:01 UTC, 518 requests, statuses {'INCOMPLETE': 355, 'COMPLETE': 153, 'NOT_APPLICABLE': 10}.
 
 ## Model calls in this run
 
@@ -18,15 +18,15 @@ Final full-dataset run: 2026-10-24 16:45 UTC, 518 requests, statuses {'INCOMPLET
 
 ## Expected usage of a keyed run (estimate)
 
-Pricing used: `openai/gpt-oss-120b` $0.15 / $0.60 per million input / output tokens.
+Pricing used: intent `openai/gpt-oss-120b` $0.150 / $0.60, screenshots `claude-opus-5-5` $4.00 / $20.00 per million input / output tokens.
 
-| Purpose | Calls | Input tokens | Output tokens | Est. cost (USD) |
-|---|---|---|---|---|
-| Intent classification (375 distinct texts, 40 per call) | 10 | 33,500 | 8,800 | $0.0103 |
-| Screenshot facts | 11 | 22,550 | 7,150 | $0.0077 |
-| **Total** | **21** | **56,050** | **15,950** | **$0.0180** |
+| Purpose | Model | Calls | Input tokens | Output tokens | Est. cost (USD) |
+|---|---|---|---|---|---|
+| Intent classification (375 distinct texts, 40 per call) | `openai/gpt-oss-120b` | 10 | 33,500 | 8,800 | $0.0103 |
+| Screenshot facts | `claude-opus-5-5` | 11 | 22,550 | 7,150 | $0.2332 |
+| **Total** | | **21** | **56,050** | **15,950** | **$0.2435** |
 
-- Average per request: 139 tokens, $0.000035
+- Average per request: 139 tokens, $0.000470
 
 ## Why the token bill is small
 
